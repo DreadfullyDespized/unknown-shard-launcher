@@ -11,20 +11,25 @@ internal sealed class MainForm : Form
     private readonly Label _status = new() { Dock = DockStyle.Top, Height = 48, Text = "Starting…", Padding = new Padding(8) };
     private readonly ProgressBar _bar = new() { Dock = DockStyle.Top, Height = 22, Minimum = 0, Maximum = 1000 };
     private readonly Button _play = new() { Dock = DockStyle.Bottom, Height = 40, Text = "Play", Enabled = false };
+    private readonly FlowLayoutPanel _tools = new() { Dock = DockStyle.Bottom, Height = 30, FlowDirection = FlowDirection.RightToLeft };
+    private readonly Button _uninstall = new() { Text = "Remove shard gumps", AutoSize = true };
     private UpdateResult? _result;
 
     public MainForm()
     {
         Text = "Unknown Shard";
-        ClientSize = new Size(420, 130);
+        ClientSize = new Size(420, 160);
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
+        _tools.Controls.Add(_uninstall);
+        Controls.Add(_tools);
         Controls.Add(_play);
         Controls.Add(_bar);
         Controls.Add(_status);
         _log = new LauncherLog(_layout.Logs);
         _play.Click += (_, _) => Play();
+        _uninstall.Click += (_, _) => UninstallGumps();
         Shown += async (_, _) => await RunUpdateAsync();
     }
 
@@ -84,6 +89,26 @@ internal sealed class MainForm : Form
         {
             _log.Warn("launch failed: " + e.Message);
             MessageBox.Show(this, "Could not start ClassicUO: " + e.Message, "Unknown Shard", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    /// <summary>unknown-shard#193: remove only gumps we created whose bytes are unchanged; leave everything else.</summary>
+    private void UninstallGumps()
+    {
+        var state = LauncherState.Load(_layout.StatePath);
+        if (state.UoPath is null) return;
+        if (MessageBox.Show(this, "Remove the gump files this launcher added to your UO Gumps folder?\nFiles you changed and files from other shards are kept.",
+                "Unknown Shard", MessageBoxButtons.YesNo) != DialogResult.Yes) return;
+        try
+        {
+            var r = GumpLedger.Load(Path.Combine(state.UoPath, "Gumps")).Uninstall();
+            _log.Info($"uninstall gumps: removed [{string.Join(", ", r.Removed)}], kept [{string.Join(", ", r.Kept)}]");
+            _status.Text = $"Removed {r.Removed.Count} gump(s); kept {r.Kept.Count} changed file(s).";
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            _log.Warn("uninstall failed: " + e.Message);
+            _status.Text = "Uninstall failed: " + e.Message;
         }
     }
 

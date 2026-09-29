@@ -67,6 +67,7 @@ public sealed class Updater(InstallLayout layout, IPatchSource source, IReadOnly
         var gumpFiles = wanted.Where(f => DestRules.Parse(f.Dest).Root == DestRoot.UoGumps).ToList();
 
         var ledger = GumpLedger.Load(Path.Combine(uoPath, "Gumps"));
+        if (ledger.LoadWarning is not null) log.Warn("Gumps ledger: " + ledger.LoadWarning);
         var gumpPlan = new List<(ManifestFile F, string Name, GumpAction Action)>();
         foreach (var f in gumpFiles)
         {
@@ -162,6 +163,15 @@ public sealed class Updater(InstallLayout layout, IPatchSource source, IReadOnly
                 log.Warn($"Gumps\\{name} not installed: {e.Message}");
             }
         }
+        // Owned gumps the release no longer lists at all are retired (hash-guarded; edited files are kept).
+        var listed = m.Files.Select(f => DestRules.Parse(f.Dest)).Where(t => t.Root == DestRoot.UoGumps).Select(t => t.FileName);
+        var ownedBefore = ledger.Files.Count;
+        try
+        {
+            foreach (var r in ledger.Retire(listed)) { gumpsChanged = true; log.Info($"retired Gumps\\{r}"); }
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { log.Warn("retire failed: " + e.Message); }
+        if (ledger.Files.Count != ownedBefore) gumpsChanged = true;
         if (gumpsChanged)
         {
             try { ledger.Save(); }
