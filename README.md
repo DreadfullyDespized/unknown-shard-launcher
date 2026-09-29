@@ -24,5 +24,18 @@ We do not pay for a code-signing certificate, so Windows SmartScreen and some an
 
 VirusTotal link and build-from-source instructions: *TBD* (unknown-shard#197/#198).
 
+## Layout
+- `src/UnknownShard.Patching/`: the shared manifest core. It holds the schema, canonical JSON, the path allowlist, ECDSA P-256 verification and the serial guard. It is byte-identical with `tools/ManifestTool/src/UnknownShard.Patching/` in the shard repo, which is the code that signs manifests.
+- `src/UnknownShard.Launcher.Core/`: the updater pipeline: fetch, verify, diff, stage, verify, promote. It also holds the Gumps ledger, the launch command and the embedded public key (`keys/patch-signing-public.pem`, key id `us-2026a`, SHA-256 `ca2b00c134ed7a0a2f6e99811c233ef0141895eba05670e89c338d0fb54773a4`).
+- `src/UnknownShardLauncher/`: the WinForms UI (net8.0-windows, asInvoker): a status line, a progress bar and a Play button.
+- `tests/UnknownShard.Launcher.Tests/`: xunit tests that run on Linux or Windows.
+
+## Build from source
+```
+dotnet test UnknownShardLauncher.sln -c Release
+dotnet publish src/UnknownShardLauncher -c Release -r win-x64 --self-contained false -o out
+```
+Linux builds work because `EnableWindowsTargeting=true` is set. The app itself runs on Windows only.
+
 ## License
 MIT, see [LICENSE](LICENSE). ClassicUO is BSD 2-Clause and is redistributed unmodified with its notice.
