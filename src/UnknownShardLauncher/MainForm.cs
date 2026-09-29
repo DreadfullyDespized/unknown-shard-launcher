@@ -60,7 +60,7 @@ internal sealed class MainForm : Form
             _log.Warn("updater crashed: " + e);
             _result = new UpdateResult(UpdateOutcome.KeptLastGood, "Update failed: " + e.Message, state.CurrentSerial,
                 state.CurrentSerial > 0 && File.Exists(_layout.OverrideFile(state.CurrentSerial)) ? _layout.OverrideFile(state.CurrentSerial) : null,
-                0, Array.Empty<string>(), false);
+                0, Array.Empty<string>(), false) { Cuo = new CuoInstaller(_layout, Authenticode.ForPlatform(), _log).VerifyInstalled() };
         }
 
         _bar.Value = 1000;
@@ -69,14 +69,23 @@ internal sealed class MainForm : Form
         if (_result.LauncherUpdateRequired) msg += " A newer launcher is required.";
         _status.Text = msg;
 
-        if (File.Exists(_layout.CuoExe)) _play.Enabled = true;
-        else _status.Text += Environment.NewLine + "ClassicUO is not installed yet (cuo\\ClassicUO.exe).";
+        // unknown-shard#194: Play only with a hash-verified, Authenticode-verified pinned ClassicUO.
+        if (_result.Cuo.Ok) _play.Enabled = true;
+        else _status.Text += Environment.NewLine + _result.Cuo.Message;
     }
 
     private void Play()
     {
         var state = LauncherState.Load(_layout.StatePath);
         if (state.UoPath is null) return;
+        var cuo = new CuoInstaller(_layout, Authenticode.ForPlatform(), _log).VerifyInstalled();
+        if (!cuo.Ok)
+        {
+            _log.Warn(cuo.Message);
+            _status.Text = cuo.Message;
+            _play.Enabled = false;
+            return;
+        }
         Directory.CreateDirectory(_layout.Profiles);
         var psi = LaunchCommand.Build(_layout, state.UoPath, _result?.OverrideFile);
         _log.Info($"launching {psi.FileName} {string.Join(' ', psi.ArgumentList)}");
