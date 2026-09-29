@@ -84,8 +84,10 @@ public sealed class GumpLedger
     }
 
     /// <summary>Install a verified staged file. Create never overwrites; UpdateOwned re-checks ownership first.</summary>
-    public void Install(string name, string stagedPath, string sha, GumpAction action)
+    public void Install(string name, string stagedPath, string sha, GumpAction action, bool repairModified = false)
     {
+        // Repair (explicit user action) may restore an owned file the user edited; foreign files are never writable.
+        if (repairModified && action == GumpAction.ConflictModified) action = GumpAction.UpdateOwned;
         if (action is not (GumpAction.Create or GumpAction.UpdateOwned)) throw new InvalidOperationException($"not writable: {action}");
         var path = PathFor(name);
         if (!Directory.Exists(GumpsDir))
@@ -103,7 +105,9 @@ public sealed class GumpLedger
                 File.Move(tmp, path, overwrite: false); // throws if something appeared meanwhile
             else
             {
-                if (Decide(name, sha) != GumpAction.UpdateOwned) throw new IOException($"{name}: ownership changed, not overwriting");
+                var now = Decide(name, sha);
+                if (!(now == GumpAction.UpdateOwned || (repairModified && now == GumpAction.ConflictModified)))
+                    throw new IOException($"{name}: ownership changed, not overwriting");
                 File.Move(tmp, path, overwrite: true);
             }
             Files[name] = sha;

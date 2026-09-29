@@ -142,6 +142,11 @@ public sealed class Harness : IDisposable
 
     public LauncherState State => LauncherState.Load(Layout.StatePath);
 
+    public RollbackManager Rollback => new(Layout, new LauncherLog(Layout.Logs));
+
+    public Task<UpdateResult> Repair() =>
+        new Updater(Layout, Source, Trusted, LauncherVersion, new LauncherLog(Layout.Logs), Verifier).RunAsync(repair: true);
+
     public void Dispose()
     {
         Key.Dispose();

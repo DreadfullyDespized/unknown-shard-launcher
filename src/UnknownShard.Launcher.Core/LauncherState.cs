@@ -11,6 +11,18 @@ public sealed class LauncherState
     [JsonPropertyName("highest_serial")] public long HighestSerial { get; set; }
     /// <summary>Serial of the promoted (last-good) art version; 0 = none.</summary>
     [JsonPropertyName("current_serial")] public long CurrentSerial { get; set; }
+    /// <summary>Last version confirmed good: ClassicUO ran &gt; 60 s on it (plan §6.2). 0 = none yet.</summary>
+    [JsonPropertyName("last_good_serial")] public long LastGoodSerial { get; set; }
+    /// <summary>The version that was active before the current one (kept on disk for "Use previous version").</summary>
+    [JsonPropertyName("previous_serial")] public long PreviousSerial { get; set; }
+    /// <summary>A release rolled back on this PC; never re-promoted, only a higher serial replaces it.</summary>
+    [JsonPropertyName("bad_serial")] public long BadSerial { get; set; }
+    /// <summary>Unconfirmed release under trial: pending | running | crashed.</summary>
+    [JsonPropertyName("trial_serial")] public long TrialSerial { get; set; }
+    [JsonPropertyName("trial_status")] public string? TrialStatus { get; set; }
+    [JsonPropertyName("trial_started_utc")] public DateTimeOffset? TrialStartedUtc { get; set; }
+
+    public void ClearTrial() { TrialSerial = 0; TrialStatus = null; TrialStartedUtc = null; }
 
     public static LauncherState Load(string path) =>
         File.Exists(path) ? JsonSerializer.Deserialize<LauncherState>(File.ReadAllBytes(path)) ?? new() : new();
