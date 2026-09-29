@@ -1,0 +1,56 @@
+Third-party notices for the ClassicUO client mirrored by Unknown Shard
+======================================================================
+
+The Unknown Shard launcher downloads an UNMODIFIED official ClassicUO Windows
+release build (ClassicUO-win-x64-release.zip, Authenticode-signed by
+"SignPath Foundation") from the Unknown Shard patch server and extracts it into
+%LOCALAPPDATA%\UnknownShard\cuo\. The upstream zip ships without license files,
+so the notices below are reproduced here as required for binary redistribution.
+Source code: https://github.com/ClassicUO/ClassicUO (the exact commit is listed
+in the signed patch manifest, field cuo.version).
+
+----------------------------------------------------------------------
+ClassicUO (ClassicUO.exe, cuo.dll, cuoapi.dll, ClassicUO.*.pdb)
+----------------------------------------------------------------------
+BSD 2-Clause License
+
+Copyright (c) 2025, andreakarasho
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+- Redistributions of source code must retain the above copyright notice, this
+  list of conditions and the following disclaimer.
+
+- Redistributions in binary form must reproduce the above copyright notice,
+  this list of conditions and the following disclaimer in the documentation
+  and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+----------------------------------------------------------------------
+Bundled components (licenses as published by their upstream projects)
+----------------------------------------------------------------------
+- FNA (FNA.dll.config, FNA.pdb; FNA code linked into the client):
+  Microsoft Public License (Ms-PL). https://github.com/FNA-XNA/FNA
+- FNA3D.dll, FAudio.dll, libtheorafile.dll: zlib License.
+  https://github.com/FNA-XNA/FNA3D  https://github.com/FNA-XNA/FAudio  https://github.com/FNA-XNA/Theorafile
+- SDL3.dll: zlib License. https://github.com/libsdl-org/SDL
+- zlib.dll: zlib License. https://zlib.net
+- MP3Sharp (MP3Sharp.pdb; code linked into the client): GNU LGPL v3.0.
+  Source: https://github.com/andreakarasho/MP3Sharp
+- System.Buffers.dll, System.Memory.dll, System.Numerics.Vectors.dll,
+  System.Runtime.CompilerServices.Unsafe.dll: MIT License, (c) .NET Foundation.
+- FileEmbed (build-time source generator): MIT License.
+
+Full license texts: see each project's repository linked above.

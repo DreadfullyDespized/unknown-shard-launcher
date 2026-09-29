@@ -6,6 +6,17 @@ using UnknownShard.Patching;
 
 namespace UnknownShard.Launcher.Tests;
 
+/// <summary>Test Authenticode: a file is "signed by X" iff its bytes start with "SIGNED:X\n".</summary>
+public sealed class FakeVerifier : IAuthenticodeVerifier
+{
+    public AuthenticodeResult Verify(string path)
+    {
+        var text = System.Text.Encoding.ASCII.GetString(File.ReadAllBytes(path));
+        if (!text.StartsWith("SIGNED:", StringComparison.Ordinal)) return new(false, null, "not signed");
+        return new(true, text[7..text.IndexOf('\n')], "fake");
+    }
+}
+
 /// <summary>In-memory patch server. Counts object downloads.</summary>
 public sealed class FakeSource : IPatchSource
 {
@@ -84,9 +95,12 @@ public sealed class Harness : IDisposable
     public byte[] Publish(PatchManifest m, bool validate = true, Func<byte[], byte[]>? tamperManifest = null)
     {
         if (validate) ManifestValidator.Validate(m);
+        var all = new[] { Gump3510, AnimMul }.Concat(Extra).ToList();
         foreach (var f in m.Files)
             if (!Source.Files.ContainsKey(f.File))
-                Source.Files[f.File] = new[] { Gump3510, AnimMul }.Concat(Extra).First(b => Sha(b) == f.Sha256);
+                Source.Files[f.File] = all.First(b => Sha(b) == f.Sha256);
+        if (m.Cuo is not null && !Source.Files.ContainsKey(m.Cuo.File))
+            Source.Files[m.Cuo.File] = all.First(b => Sha(b) == m.Cuo.Sha256);
         var bytes = ManifestJson.Serialize(m);
         var sig = Key.SignData(bytes, HashAlgorithmName.SHA256, DSASignatureFormat.Rfc3279DerSequence);
         var path = $"manifests/{m.Serial}.json";
@@ -99,7 +113,32 @@ public sealed class Harness : IDisposable
     public List<byte[]> Extra { get; } = new();
 
     public Task<UpdateResult> Run() =>
-        new Updater(Layout, Source, Trusted, LauncherVersion, new LauncherLog(Layout.Logs)).RunAsync();
+        new Updater(Layout, Source, Trusted, LauncherVersion, new LauncherLog(Layout.Logs), Verifier).RunAsync();
+
+    public IAuthenticodeVerifier Verifier { get; set; } = new FakeVerifier();
+
+    /// <summary>Build a fake ClassicUO release zip (flat, like the real one) and register it as an object.</summary>
+    public CuoEntry CuoZip(string exeContent = "SIGNED:SignPath Foundation\nexe-v1", string subject = "SignPath Foundation",
+        Action<System.IO.Compression.ZipArchive>? extra = null)
+    {
+        using var ms = new MemoryStream();
+        using (var z = new System.IO.Compression.ZipArchive(ms, System.IO.Compression.ZipArchiveMode.Create, true))
+        {
+            void Add(string name, string content)
+            {
+                using var w = new StreamWriter(z.CreateEntry(name).Open());
+                w.Write(content);
+            }
+            if (exeContent.Length > 0) Add("ClassicUO.exe", exeContent);
+            Add("cuo.dll", "native");
+            Add("SDL3.dll", "sdl");
+            extra?.Invoke(z);
+        }
+        var bytes = ms.ToArray();
+        Extra.Add(bytes);
+        return new CuoEntry { File = "objects/" + Sha(bytes), Sha256 = Sha(bytes), Size = bytes.Length,
+            Version = "ClassicUO-main-release@test", AuthenticodeSubject = subject };
+    }
 
     public LauncherState State => LauncherState.Load(Layout.StatePath);
 

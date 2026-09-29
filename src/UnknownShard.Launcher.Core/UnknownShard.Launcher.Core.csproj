@@ -11,5 +11,6 @@
   <ItemGroup>
     <!-- Trusted manifest-signing public key(s), compiled into the launcher. -->
     <EmbeddedResource Include="..\..\keys\patch-signing-public.pem" LogicalName="keys.us-2026a.pem" />
+    <EmbeddedResource Include="..\..\notices\ClassicUO-THIRD-PARTY-NOTICES.txt" LogicalName="notices.cuo.txt" />
   </ItemGroup>
 </Project>

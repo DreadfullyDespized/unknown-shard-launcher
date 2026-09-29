@@ -15,18 +15,32 @@ public sealed record UpdateResult(
     string? OverrideFile,
     int ObjectsDownloaded,
     IReadOnlyList<string> Conflicts,
-    bool LauncherUpdateRequired);
+    bool LauncherUpdateRequired)
+{
+    /// <summary>Result of the full ClassicUO verify (hash index + Authenticode). Play requires Ok.</summary>
+    public CuoCheck Cuo { get; init; } = new(false, "not checked");
+}
 
 /// <summary>fetch → verify signature → validate → diff → stage → verify → promote (plan §3, unknown-shard#192).</summary>
 public sealed class Updater(InstallLayout layout, IPatchSource source, IReadOnlyDictionary<string, string> trustedKeys,
-    Version launcherVersion, LauncherLog log)
+    Version launcherVersion, LauncherLog log, IAuthenticodeVerifier? verifier = null)
 {
+    private readonly CuoInstaller _cuo = new(layout, verifier ?? Authenticode.ForPlatform(), log);
+
     public const int MaxPointerBytes = 4 * 1024;
     public const int MaxManifestBytes = 1024 * 1024;
     public const int MaxSigBytes = 4 * 1024;
     private const string VersionIndex = ".files.json";
 
     public async Task<UpdateResult> RunAsync(IProgress<UpdateProgress>? progress = null, CancellationToken ct = default)
+    {
+        var r = await RunCoreAsync(progress, ct).ConfigureAwait(false);
+        var cuo = _cuo.VerifyInstalled();
+        if (!cuo.Ok) log.Warn(cuo.Message);
+        return r with { Cuo = cuo };
+    }
+
+    private async Task<UpdateResult> RunCoreAsync(IProgress<UpdateProgress>? progress, CancellationToken ct)
     {
         var state = LauncherState.Load(layout.StatePath);
         var uoPath = state.UoPath ?? throw new InvalidOperationException("UO data folder not configured");
@@ -89,6 +103,10 @@ public sealed class Updater(InstallLayout layout, IPatchSource source, IReadOnly
                 if (LocalCopy(prevIndex, state.CurrentSerial, f) is null) need.TryAdd(f.Sha256, f);
         foreach (var g in gumpPlan)
             if (g.Action is GumpAction.Create or GumpAction.UpdateOwned) need.TryAdd(g.F.Sha256, g.F);
+        var cuoWant = m.Cuo;
+        bool installCuo = cuoWant is not null && !_cuo.IsCurrent(cuoWant);
+        if (installCuo)
+            need.TryAdd(cuoWant!.Sha256, new ManifestFile { Id = "classicuo", File = cuoWant.File, Sha256 = cuoWant.Sha256, Size = cuoWant.Size });
 
         // 3. stage + verify every object before touching anything live
         long total = need.Values.Sum(f => f.Size), done = 0;
@@ -146,6 +164,16 @@ public sealed class Updater(InstallLayout layout, IPatchSource source, IReadOnly
             }
         }
 
+        // 4b. pinned ClassicUO (unknown-shard#194): a refused client never blocks art/gumps; the old client is kept.
+        bool cuoChanged = false;
+        if (installCuo)
+        {
+            progress?.Report(new("Installing ClassicUO", total, total));
+            var c = _cuo.Install(Path.Combine(layout.Staging, cuoWant!.Sha256), cuoWant);
+            cuoChanged = c.Ok;
+            if (!c.Ok) conflicts.Add(c.Message);
+        }
+
         // 5. Gumps: add-only / ledger-owned only
         bool gumpsChanged = false;
         foreach (var (f, name, action) in gumpPlan)
@@ -179,7 +207,7 @@ public sealed class Updater(InstallLayout layout, IPatchSource source, IReadOnly
         }
         ResetStaging();
 
-        var outcome = downloads > 0 || promoteArt || gumpsChanged ? UpdateOutcome.Updated : UpdateOutcome.UpToDate;
+        var outcome = downloads > 0 || promoteArt || gumpsChanged || cuoChanged ? UpdateOutcome.Updated : UpdateOutcome.UpToDate;
         var msg = outcome == UpdateOutcome.Updated ? $"Updated to {m.Version}" : $"Up to date ({m.Version})";
         log.Info($"{msg}; {downloads} download(s), {conflicts.Count} conflict(s)");
         return new UpdateResult(outcome, msg, state.CurrentSerial, OverrideFor(state.CurrentSerial), downloads, conflicts, false);
