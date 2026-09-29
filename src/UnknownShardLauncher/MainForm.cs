@@ -13,6 +13,9 @@ internal sealed class MainForm : Form
     private readonly Button _play = new() { Dock = DockStyle.Bottom, Height = 40, Text = "Play", Enabled = false };
     private readonly FlowLayoutPanel _tools = new() { Dock = DockStyle.Bottom, Height = 30, FlowDirection = FlowDirection.RightToLeft };
     private readonly Button _uninstall = new() { Text = "Remove shard gumps", AutoSize = true };
+    private readonly Button _repair = new() { Text = "Repair", AutoSize = true };
+    private readonly Button _previous = new() { Text = "Use previous version", AutoSize = true };
+    private readonly RollbackManager _rollback;
     private UpdateResult? _result;
 
     public MainForm()
@@ -23,18 +26,24 @@ internal sealed class MainForm : Form
         MaximizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
         _tools.Controls.Add(_uninstall);
+        _tools.Controls.Add(_previous);
+        _tools.Controls.Add(_repair);
         Controls.Add(_tools);
         Controls.Add(_play);
         Controls.Add(_bar);
         Controls.Add(_status);
         _log = new LauncherLog(_layout.Logs);
-        _play.Click += (_, _) => Play();
+        _rollback = new RollbackManager(_layout, _log);
+        _play.Click += async (_, _) => await PlayAsync();
         _uninstall.Click += (_, _) => UninstallGumps();
+        _repair.Click += async (_, _) => await RunUpdateAsync(repair: true);
+        _previous.Click += (_, _) => UsePrevious();
         Shown += async (_, _) => await RunUpdateAsync();
     }
 
-    private async Task RunUpdateAsync()
+    private async Task RunUpdateAsync(bool repair = false)
     {
+        _play.Enabled = _repair.Enabled = _previous.Enabled = false;
         var state = LauncherState.Load(_layout.StatePath);
         if (state.UoPath is null || !Directory.Exists(state.UoPath))
         {
@@ -43,6 +52,9 @@ internal sealed class MainForm : Form
             state.UoPath = picked;
             state.Save(_layout.StatePath);
         }
+
+        // unknown-shard#195: revert first if the last trial crashed early or local files fail verification.
+        var reverted = _rollback.RecoverOnStartup();
 
         var progress = new Progress<UpdateProgress>(p =>
         {
@@ -53,7 +65,9 @@ internal sealed class MainForm : Form
             typeof(MainForm).Assembly.GetName().Version ?? new Version(1, 0, 0), _log);
         try
         {
-            _result = await Task.Run(() => updater.RunAsync(progress));
+            _result = await Task.Run(() => updater.RunAsync(progress, default, repair));
+            // Repair when offline / still broken: fall back to a verified earlier version.
+            reverted ??= repair ? _rollback.RecoverOnStartup() : null;
         }
         catch (Exception e)
         {
@@ -64,17 +78,18 @@ internal sealed class MainForm : Form
         }
 
         _bar.Value = 1000;
-        var msg = _result.Message;
+        var msg = (reverted is null ? "" : reverted + " ") + _result.Message;
         if (_result.Conflicts.Count > 0) msg += $" ({_result.Conflicts.Count} file(s) skipped, see log)";
         if (_result.LauncherUpdateRequired) msg += " A newer launcher is required.";
         _status.Text = msg;
 
         // unknown-shard#194: Play only with a hash-verified, Authenticode-verified pinned ClassicUO.
+        _repair.Enabled = _previous.Enabled = true;
         if (_result.Cuo.Ok) _play.Enabled = true;
         else _status.Text += Environment.NewLine + _result.Cuo.Message;
     }
 
-    private void Play()
+    private async Task PlayAsync()
     {
         var state = LauncherState.Load(_layout.StatePath);
         if (state.UoPath is null) return;
@@ -91,8 +106,18 @@ internal sealed class MainForm : Form
         _log.Info($"launching {psi.FileName} {string.Join(' ', psi.ArgumentList)}");
         try
         {
-            Process.Start(psi);
-            Close();
+            using var proc = Process.Start(psi) ?? throw new System.ComponentModel.Win32Exception("process did not start");
+            var started = DateTimeOffset.UtcNow;
+            _rollback.OnLaunched(started);
+            Hide();
+            // Watch the first 60 s: survive → last_good; non-zero exit → trial marked crashed → revert.
+            var exitTask = proc.WaitForExitAsync();
+            var exited = await Task.WhenAny(exitTask, Task.Delay(RollbackManager.ConfirmAfter)) == exitTask;
+            if (!exited) { _rollback.OnConfirmed(); Close(); return; }
+            _rollback.OnExited(DateTimeOffset.UtcNow - started, proc.ExitCode);
+            var reverted = _rollback.RecoverOnStartup();
+            Show();
+            _status.Text = reverted ?? $"ClassicUO closed after {(DateTimeOffset.UtcNow - started).TotalSeconds:0} s (exit code {proc.ExitCode}).";
         }
         catch (System.ComponentModel.Win32Exception e)
         {
@@ -119,6 +144,19 @@ internal sealed class MainForm : Form
             _log.Warn("uninstall failed: " + e.Message);
             _status.Text = "Uninstall failed: " + e.Message;
         }
+    }
+
+    private void UsePrevious()
+    {
+        if (MessageBox.Show(this, "Switch back to the previous shard art version?\nThe current one will be skipped until a newer release is published.",
+                "Unknown Shard", MessageBoxButtons.YesNo) != DialogResult.Yes) return;
+        _status.Text = _rollback.UsePrevious();
+        var s = LauncherState.Load(_layout.StatePath);
+        _result = _result is null ? null : _result with
+        {
+            LaunchSerial = s.CurrentSerial,
+            OverrideFile = s.CurrentSerial > 0 && File.Exists(_layout.OverrideFile(s.CurrentSerial)) ? _layout.OverrideFile(s.CurrentSerial) : null,
+        };
     }
 
     private string? PickUoFolder()

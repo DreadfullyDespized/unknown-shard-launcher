@@ -30,17 +30,20 @@ public sealed class Updater(InstallLayout layout, IPatchSource source, IReadOnly
     public const int MaxPointerBytes = 4 * 1024;
     public const int MaxManifestBytes = 1024 * 1024;
     public const int MaxSigBytes = 4 * 1024;
-    private const string VersionIndex = ".files.json";
 
-    public async Task<UpdateResult> RunAsync(IProgress<UpdateProgress>? progress = null, CancellationToken ct = default)
+    private readonly VersionStore _store = new(layout, log);
+
+    /// <param name="repair">Repair button: rebuild the active set from hash-verified local copies + re-downloads,
+    /// restore user-edited owned gumps, reinstall ClassicUO if it fails verification.</param>
+    public async Task<UpdateResult> RunAsync(IProgress<UpdateProgress>? progress = null, CancellationToken ct = default, bool repair = false)
     {
-        var r = await RunCoreAsync(progress, ct).ConfigureAwait(false);
+        var r = await RunCoreAsync(progress, ct, repair).ConfigureAwait(false);
         var cuo = _cuo.VerifyInstalled();
         if (!cuo.Ok) log.Warn(cuo.Message);
         return r with { Cuo = cuo };
     }
 
-    private async Task<UpdateResult> RunCoreAsync(IProgress<UpdateProgress>? progress, CancellationToken ct)
+    private async Task<UpdateResult> RunCoreAsync(IProgress<UpdateProgress>? progress, CancellationToken ct, bool repair)
     {
         var state = LauncherState.Load(layout.StatePath);
         var uoPath = state.UoPath ?? throw new InvalidOperationException("UO data folder not configured");
@@ -73,38 +76,37 @@ public sealed class Updater(InstallLayout layout, IPatchSource source, IReadOnly
                 OverrideFor(state.CurrentSerial), 0, conflicts, false);
         if (Version.Parse(m.MinLauncher) > launcherVersion)
             return LastGood(state, $"This launcher ({launcherVersion}) is too old; {m.MinLauncher} required.", conflicts, downloads, true);
+        if (state.BadSerial != 0 && m.Serial == state.BadSerial)
+            return LastGood(state, $"Release {m.Version} was rolled back on this PC; waiting for a newer release.", conflicts, downloads, false);
+        if (state.BadSerial != 0 && m.Serial > state.BadSerial) state.BadSerial = 0;
 
-        // 2. diff
+        // 2. diff: the expected version index (art at root, gumps under gumps/)
         var skipNames = StockMismatches(m, uoPath);
-        var wanted = m.Files.Where(f => !f.Hold && !skipNames.Contains(DestRules.Parse(f.Dest).FileName)).ToList();
-        var art = wanted.Where(f => DestRules.Parse(f.Dest).Root == DestRoot.ShardArt).ToList();
-        var gumpFiles = wanted.Where(f => DestRules.Parse(f.Dest).Root == DestRoot.UoGumps).ToList();
-
-        var ledger = GumpLedger.Load(Path.Combine(uoPath, "Gumps"));
-        if (ledger.LoadWarning is not null) log.Warn("Gumps ledger: " + ledger.LoadWarning);
-        var gumpPlan = new List<(ManifestFile F, string Name, GumpAction Action)>();
-        foreach (var f in gumpFiles)
+        var gumpsDir = Path.Combine(uoPath, "Gumps");
+        var expected = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        var entries = new List<(string Rel, ManifestFile F, string? Extra)>();
+        foreach (var f in m.Files.Where(f => !f.Hold))
         {
-            var name = DestRules.Parse(f.Dest).FileName;
-            var a = ledger.Decide(name, f.Sha256);
-            if (a is GumpAction.ConflictForeign or GumpAction.ConflictModified)
-            {
-                conflicts.Add($"Gumps\\{name}: {a}, left untouched");
-                log.Warn($"conflict: Gumps\\{name} {a}; not overwriting");
-            }
-            gumpPlan.Add((f, name, a));
+            var t = DestRules.Parse(f.Dest);
+            if (skipNames.Contains(t.FileName)) continue;
+            var rel = t.Root == DestRoot.ShardArt ? t.FileName : VersionStore.GumpsSub + "/" + t.FileName;
+            expected[rel] = f.Sha256;
+            // An identical gump already in <UO>\Gumps (ours or not) can seed the version folder without a download.
+            entries.Add((rel, f, t.Root == DestRoot.UoGumps ? Path.Combine(gumpsDir, t.FileName) : null));
         }
 
-        bool promoteArt = state.CurrentSerial != m.Serial || !Directory.Exists(layout.VersionDir(m.Serial));
-        var prevIndex = ReadIndex(state.CurrentSerial);
+        bool promote = repair || state.CurrentSerial != m.Serial || !_store.IndexEquals(m.Serial, expected);
+        var local = new Dictionary<string, string>(StringComparer.Ordinal);
         var need = new Dictionary<string, ManifestFile>(StringComparer.Ordinal);
-        if (promoteArt)
-            foreach (var f in art)
-                if (LocalCopy(prevIndex, state.CurrentSerial, f) is null) need.TryAdd(f.Sha256, f);
-        foreach (var g in gumpPlan)
-            if (g.Action is GumpAction.Create or GumpAction.UpdateOwned) need.TryAdd(g.F.Sha256, g.F);
+        if (promote)
+            foreach (var (rel, f, extra) in entries)
+            {
+                if (local.ContainsKey(f.Sha256) || need.ContainsKey(f.Sha256)) continue;
+                var hit = _store.FindLocal(f.Sha256, f.Size, extra is null || IsLink(extra) ? null : new[] { extra });
+                if (hit is not null) local[f.Sha256] = hit; else need[f.Sha256] = f;
+            }
         var cuoWant = m.Cuo;
-        bool installCuo = cuoWant is not null && !_cuo.IsCurrent(cuoWant);
+        bool installCuo = cuoWant is not null && (!_cuo.IsCurrent(cuoWant) || (repair && !_cuo.VerifyInstalled().Ok));
         if (installCuo)
             need.TryAdd(cuoWant!.Sha256, new ManifestFile { Id = "classicuo", File = cuoWant.File, Sha256 = cuoWant.Sha256, Size = cuoWant.Size });
 
@@ -123,6 +125,7 @@ public sealed class Updater(InstallLayout layout, IPatchSource source, IReadOnly
                 var (sha, size) = Hashing.HashFile(staged);
                 if (sha != f.Sha256 || size != f.Size)
                     throw new ManifestValidationException($"object for '{f.Id}' failed verification (sha/size mismatch)");
+                local[f.Sha256] = staged;
             }
         }
         catch (Exception e) when (IsUpdateFailure(e, ct))
@@ -131,30 +134,36 @@ public sealed class Updater(InstallLayout layout, IPatchSource source, IReadOnly
             return LastGood(state, "Update rejected: " + e.Message, conflicts, downloads, false);
         }
 
-        // 4. promote shard art: build the new version folder, then flip the pointer
-        if (promoteArt)
+        // 4. promote: build the complete new set in a temp folder, swap it in, then flip the pointer
+        if (promote)
         {
             var final = layout.VersionDir(m.Serial);
             var tmp = final + ".tmp-" + Guid.NewGuid().ToString("N");
+            var old = final + ".old-" + Guid.NewGuid().ToString("N");
             try
             {
                 progress?.Report(new("Installing", total, total));
-                Directory.CreateDirectory(tmp);
-                var index = new SortedDictionary<string, string>(StringComparer.Ordinal);
-                foreach (var f in art)
+                Directory.CreateDirectory(Path.Combine(tmp, VersionStore.GumpsSub));
+                foreach (var (rel, f, _) in entries)
+                    File.Copy(local[f.Sha256], CuoInstaller.SafeJoin(tmp, rel), overwrite: false);
+                File.WriteAllBytes(Path.Combine(tmp, VersionStore.IndexName), JsonSerializer.SerializeToUtf8Bytes(expected));
+                File.WriteAllText(Path.Combine(tmp, "uofiles-override.txt"),
+                    VersionStore.BuildOverride(m, expected.Keys.Where(k => !k.Contains('/')), final), new UTF8Encoding(false));
+                if (Directory.Exists(final)) Directory.Move(final, old); // same serial (repair / stale partial)
+                try { Directory.Move(tmp, final); }
+                catch { if (Directory.Exists(old) && !Directory.Exists(final)) Directory.Move(old, final); throw; }
+                TryDelete(old);
+                if (state.CurrentSerial != m.Serial)
                 {
-                    var name = DestRules.Parse(f.Dest).FileName;
-                    var src = LocalCopy(prevIndex, state.CurrentSerial, f) ?? Path.Combine(layout.Staging, f.Sha256);
-                    File.Copy(src, DestRules.Resolve(tmp, name), overwrite: false);
-                    index[name] = f.Sha256;
+                    if (state.CurrentSerial > 0) state.PreviousSerial = state.CurrentSerial;
+                    state.TrialSerial = m.Serial;
+                    state.TrialStatus = "pending";
+                    state.TrialStartedUtc = null;
                 }
-                File.WriteAllBytes(Path.Combine(tmp, VersionIndex), JsonSerializer.SerializeToUtf8Bytes(index));
-                File.WriteAllText(Path.Combine(tmp, "uofiles-override.txt"), BuildOverride(m, index.Keys, final), new UTF8Encoding(false));
-                if (Directory.Exists(final)) Directory.Delete(final, recursive: true); // stale partial from a crash; ours
-                Directory.Move(tmp, final);
                 state.CurrentSerial = m.Serial;
                 state.Save(layout.StatePath); // atomic switch to the new set
-                log.Info($"promoted art version {m.Serial}");
+                _store.Prune(state.CurrentSerial, state.PreviousSerial, state.LastGoodSerial);
+                log.Info($"promoted version {m.Serial}{(repair ? " (repair)" : "")}");
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException)
             {
@@ -163,55 +172,30 @@ public sealed class Updater(InstallLayout layout, IPatchSource source, IReadOnly
                 return LastGood(state, "Install failed, previous version kept: " + e.Message, conflicts, downloads, false);
             }
         }
+        else state.Save(layout.StatePath);
 
         // 4b. pinned ClassicUO (unknown-shard#194): a refused client never blocks art/gumps; the old client is kept.
         bool cuoChanged = false;
         if (installCuo)
         {
             progress?.Report(new("Installing ClassicUO", total, total));
-            var c = _cuo.Install(Path.Combine(layout.Staging, cuoWant!.Sha256), cuoWant);
+            var c = _cuo.Install(local[cuoWant!.Sha256], cuoWant);
             cuoChanged = c.Ok;
             if (!c.Ok) conflicts.Add(c.Message);
         }
 
-        // 5. Gumps: add-only / ledger-owned only
-        bool gumpsChanged = false;
-        foreach (var (f, name, action) in gumpPlan)
-        {
-            if (action is not (GumpAction.Create or GumpAction.UpdateOwned)) continue;
-            try
-            {
-                ledger.Install(name, Path.Combine(layout.Staging, f.Sha256), f.Sha256, action);
-                gumpsChanged = true;
-                log.Info($"installed Gumps\\{name} ({action})");
-            }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-            {
-                conflicts.Add($"Gumps\\{name}: {e.Message}");
-                log.Warn($"Gumps\\{name} not installed: {e.Message}");
-            }
-        }
-        // Owned gumps the release no longer lists at all are retired (hash-guarded; edited files are kept).
-        var listed = m.Files.Select(f => DestRules.Parse(f.Dest)).Where(t => t.Root == DestRoot.UoGumps).Select(t => t.FileName);
-        var ownedBefore = ledger.Files.Count;
-        try
-        {
-            foreach (var r in ledger.Retire(listed)) { gumpsChanged = true; log.Info($"retired Gumps\\{r}"); }
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { log.Warn("retire failed: " + e.Message); }
-        if (ledger.Files.Count != ownedBefore) gumpsChanged = true;
-        if (gumpsChanged)
-        {
-            try { ledger.Save(); }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { log.Warn("ledger save failed: " + e.Message); }
-        }
+        // 5. Gumps: make <UO>\Gumps match the active version under the ledger rules (unknown-shard#193)
+        bool gumpsChanged = _store.ApplyGumps(state.CurrentSerial, uoPath, repair, conflicts);
         ResetStaging();
 
-        var outcome = downloads > 0 || promoteArt || gumpsChanged || cuoChanged ? UpdateOutcome.Updated : UpdateOutcome.UpToDate;
-        var msg = outcome == UpdateOutcome.Updated ? $"Updated to {m.Version}" : $"Up to date ({m.Version})";
+        var outcome = downloads > 0 || promote || gumpsChanged || cuoChanged ? UpdateOutcome.Updated : UpdateOutcome.UpToDate;
+        var msg = repair ? $"Repair finished ({m.Version}, {downloads} file(s) re-fetched)"
+            : outcome == UpdateOutcome.Updated ? $"Updated to {m.Version}" : $"Up to date ({m.Version})";
         log.Info($"{msg}; {downloads} download(s), {conflicts.Count} conflict(s)");
         return new UpdateResult(outcome, msg, state.CurrentSerial, OverrideFor(state.CurrentSerial), downloads, conflicts, false);
     }
+
+    private static bool IsLink(string path) => new FileInfo(path).LinkTarget is not null;
 
     private static bool IsUpdateFailure(Exception e, CancellationToken ct) =>
         e is ManifestValidationException or PatchSourceException or HttpRequestException or IOException
@@ -241,35 +225,8 @@ public sealed class Updater(InstallLayout layout, IPatchSource source, IReadOnly
         return skip;
     }
 
-    private Dictionary<string, string> ReadIndex(long serial)
-    {
-        var p = Path.Combine(layout.VersionDir(serial), VersionIndex);
-        if (serial <= 0 || !File.Exists(p)) return new();
-        try { return JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllBytes(p)) ?? new(); }
-        catch (JsonException) { return new(); }
-    }
 
-    /// <summary>Reuse an unchanged file from the current version instead of downloading it again.</summary>
-    private string? LocalCopy(Dictionary<string, string> prevIndex, long prevSerial, ManifestFile f)
-    {
-        var name = DestRules.Parse(f.Dest).FileName;
-        if (!prevIndex.TryGetValue(name, out var sha) || sha != f.Sha256) return null;
-        var p = Path.Combine(layout.VersionDir(prevSerial), name);
-        return File.Exists(p) && new FileInfo(p).Length == f.Size ? p : null;
-    }
 
-    /// <summary>UOFilesOverrideMap format: name=absolute path per line; '#' comments.</summary>
-    private static string BuildOverride(PatchManifest m, IEnumerable<string> present, string finalDir)
-    {
-        var have = new HashSet<string>(present, StringComparer.OrdinalIgnoreCase);
-        var sb = new StringBuilder("# generated by UnknownShardLauncher; do not edit\n");
-        foreach (var (k, v) in m.OverrideMap ?? new())
-        {
-            var name = DestRules.Parse(v).FileName;
-            if (have.Contains(name)) sb.Append(k).Append('=').Append(Path.Combine(finalDir, name)).Append('\n');
-        }
-        return sb.ToString();
-    }
 
     private void ResetStaging() => TryDelete(layout.Staging);
 
