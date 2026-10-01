@@ -1,3 +1,5 @@
+**Release tier: TEST** — verified work merges to `main`; Dread tests `main`. See [CONTRIBUTING.md](CONTRIBUTING.md#release-tier).
+
 # Unknown Shard Launcher
 
 This is the open-source (MIT) auto-updater and launcher for the **Unknown Shard** Ultima Online free shard.
