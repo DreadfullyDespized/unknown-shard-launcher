@@ -1,0 +1,13 @@
+<Project>
+  <!--
+    Server-specific build configuration is NOT committed. It is imported from:
+      - $(LauncherBuildConfig) when passed explicitly (dotnet build -p:LauncherBuildConfig=/abs/path/launcher.build.props), else
+      - launcher.build.props next to this file (gitignored).
+    See launcher.build.example.props and README "Configuring a build".
+  -->
+  <PropertyGroup>
+    <_LauncherBuildConfigExplicit Condition="'$(LauncherBuildConfig)' != ''">true</_LauncherBuildConfigExplicit>
+    <LauncherBuildConfig Condition="'$(LauncherBuildConfig)' == ''">$(MSBuildThisFileDirectory)launcher.build.props</LauncherBuildConfig>
+  </PropertyGroup>
+  <Import Project="$(LauncherBuildConfig)" Condition="Exists('$(LauncherBuildConfig)')" />
+</Project>
