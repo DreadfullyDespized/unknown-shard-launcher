@@ -1,4 +1,4 @@
-**Release tier: TEST** — verified work merges to `main`; Dread tests `main`. See [CONTRIBUTING.md](CONTRIBUTING.md#release-tier).
+**Repo label: TEST** — see [CONTRIBUTING.md](CONTRIBUTING.md#repo-label-test) for the required process.
 
 # Unknown Shard Launcher
 

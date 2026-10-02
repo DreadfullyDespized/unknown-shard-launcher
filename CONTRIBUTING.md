@@ -1,6 +1,6 @@
 # Contributing
 
-## Release tier
+## Repo label: TEST
 
 **TEST.** Verified work (issue → PR → QA checklist run → grader ≠ doer review) merges to `main` promptly; PRs must not sit unmerged once verified. Dread tests `main` builds afterward. Fixes found in testing go back through the same flow (new issue → PR → merge). Tracked by the GitHub topic `tier-test`.
 
