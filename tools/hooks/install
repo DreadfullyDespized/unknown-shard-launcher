@@ -1,0 +1,13 @@
+#!/bin/sh
+set -eu
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+current=$(git config --local --get core.hooksPath || true)
+if [ -n "$current" ] && [ "$current" != "tools/hooks" ]; then
+  echo "core.hooksPath is already $current; not changing it. Call tools/hooks/pre-push from that hook instead." >&2
+  exit 1
+fi
+chmod +x tools/hooks/pre-push
+git config --local core.hooksPath tools/hooks
+echo "pre-push gate installed: git push now runs tools/hooks/pre-push (the same steps as the gate job)."
+echo "Needs python3 with PyYAML: python3 -m pip install pyyaml==6.0.2"

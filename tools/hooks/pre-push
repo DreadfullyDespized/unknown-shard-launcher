@@ -1,0 +1,63 @@
+#!/bin/sh
+set -u
+root=$(git rev-parse --show-toplevel) || exit 1
+cd "$root" || exit 1
+py=${PYTHON:-python3}
+base=${GATE_BASE:-origin/main}
+failed=""
+
+run_step() {
+  name=$1
+  shift
+  printf '\n== %s\n' "$name"
+  if "$@"; then
+    printf 'ok: %s\n' "$name"
+  else
+    printf 'FAIL: %s\n' "$name"
+    failed="$failed
+  - $name"
+  fi
+}
+
+check_pr_body() {
+  if [ -n "${PR_BODY_FILE:-}" ]; then
+    "$py" tools/check_pr_body.py --body-file "$PR_BODY_FILE" --title "${PR_TITLE:-}" --labels "${PR_LABELS:-}"
+    return
+  fi
+  if ! command -v gh >/dev/null 2>&1; then
+    echo "skipped: gh is not installed and PR_BODY_FILE is not set; the gate checks the body on GitHub"
+    return 0
+  fi
+  branch=$(git rev-parse --abbrev-ref HEAD)
+  if ! gh pr view "$branch" --json number >/dev/null 2>&1; then
+    echo "skipped: no open PR for $branch yet; the gate checks the body when the PR opens"
+    return 0
+  fi
+  body_file=$(mktemp)
+  gh pr view "$branch" --json body --jq .body >"$body_file"
+  title=$(gh pr view "$branch" --json title --jq .title)
+  labels=$(gh pr view "$branch" --json labels --jq '[.labels[].name] | join(",")')
+  "$py" tools/check_pr_body.py --body-file "$body_file" --title "$title" --labels "$labels"
+  status=$?
+  rm -f "$body_file"
+  return "$status"
+}
+
+if [ "${GATE_SKIP_FETCH:-0}" != "1" ]; then
+  git fetch --quiet origin main 2>/dev/null || echo "note: could not fetch origin main; comparing against the local $base"
+fi
+
+run_step "Workflow lint: self-test" "$py" tools/check_workflows.py --self-test
+run_step "Workflow lint: one PR gate job, timeouts, no label triggers, no long sleeps" "$py" tools/check_workflows.py
+run_step "No comments: self-test" "$py" tools/check_no_comments.py --self-test
+run_step "No comments: fail on added comment lines" "$py" tools/check_no_comments.py --base "$base" --head HEAD
+run_step "PR body: self-test" "$py" tools/check_pr_body.py --self-test
+run_step "PR body: For Dread, Blast radius and bug-PR sections" check_pr_body
+run_step "correction-loop tests: grader, intake, close gate, issue forms, workflows" "$py" -m unittest discover -s tools/correction_loop -p "test_*.py"
+printf '\n== grader\nnot run locally: the verdict must name the pushed head, so it can only be checked on GitHub after the push\n'
+
+if [ -n "$failed" ]; then
+  printf '\npre-push gate FAILED:%s\nFix these before pushing; each push bills a full gate minute.\n' "$failed"
+  exit 1
+fi
+printf '\npre-push gate passed: same steps as the gate job in .github/workflows/gate.yml\n'

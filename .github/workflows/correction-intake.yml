@@ -2,7 +2,7 @@ name: correction-intake
 
 on:
   workflow_run:
-    workflows: ["CI", "correction-loop tests"]
+    workflows: ["CI", "gate"]
     types: [completed]
   deployment_status:
   issue_comment:
@@ -43,9 +43,15 @@ jobs:
   signature:
     if: >-
       (github.event_name != 'workflow_run' ||
-      contains(fromJSON('["failure","timed_out","startup_failure"]'), github.event.workflow_run.conclusion)) &&
+      (contains(fromJSON('["failure","timed_out","startup_failure"]'), github.event.workflow_run.conclusion) &&
+      github.event.workflow_run.event != 'pull_request')) &&
       (github.event_name != 'deployment_status' ||
-      contains(fromJSON('["failure","error"]'), github.event.deployment_status.state))
+      contains(fromJSON('["failure","error"]'), github.event.deployment_status.state)) &&
+      (github.event_name != 'issue_comment' ||
+      contains(github.event.comment.body, 'Verdict: FAIL') || contains(github.event.comment.body, '/correction')) &&
+      (github.event_name != 'pull_request_review' || contains(github.event.review.body, 'Verdict: FAIL')) &&
+      (github.event_name != 'issues' || github.event.label.name == 'dread-correction' ||
+      contains(github.event.issue.labels.*.name, 'dread-correction'))
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:

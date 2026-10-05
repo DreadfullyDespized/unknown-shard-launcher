@@ -1,0 +1,66 @@
+name: gate
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "Pull request number to grade; run it on that PR's head branch"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+
+jobs:
+  grader:
+    name: grader
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install PyYAML for the workflow lint and correction-loop tests
+        run: python -m pip install pyyaml==6.0.2
+      - name: "Workflow lint: self-test"
+        if: ${{ !cancelled() }}
+        run: python tools/check_workflows.py --self-test
+      - name: "Workflow lint: one PR gate job, timeouts, no label triggers, no long sleeps"
+        if: ${{ !cancelled() }}
+        run: python tools/check_workflows.py
+      - name: "No comments: self-test"
+        if: ${{ !cancelled() }}
+        run: python tools/check_no_comments.py --self-test
+      - name: "No comments: fail on added comment lines"
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: python tools/check_no_comments.py --base "origin/$BASE_REF" --head HEAD
+      - name: "PR body: self-test"
+        if: ${{ !cancelled() }}
+        run: python tools/check_pr_body.py --self-test
+      - name: "PR body: For Dread, Blast radius and bug-PR sections"
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: python tools/check_pr_body.py
+      - name: "correction-loop tests: grader, intake, close gate, issue forms, workflows"
+        if: ${{ !cancelled() }}
+        run: python -m unittest discover -s tools/correction_loop -p "test_*.py" -v
+      - name: "grader: fail unless a grader PASS names this head and the PR is old enough"
+        if: ${{ !cancelled() && github.event_name != 'push' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python tools/correction_loop/grader.py check

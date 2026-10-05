@@ -11,7 +11,7 @@ HEAD = "0123456789abcdef0123456789abcdef01234567"
 OLD = "fedcba9876543210fedcba9876543210fedcba98"
 CREATED = datetime(2026, 10, 4, 12, 0, tzinfo=timezone.utc)
 CFG = {"min_pr_age_minutes": 30, "grader_logins": ["DreadfullyDespized"], "min_sha_chars": 40,
-       "require_grader_run": True, "grader_run_max_age_hours": 24, "max_relay_wait_minutes": 30}
+       "require_grader_run": True, "grader_run_max_age_hours": 24}
 AUTHOR = "DreadfullyDespized"
 HEAD_TIME = CREATED - timedelta(minutes=5)
 
@@ -230,7 +230,7 @@ class FakeApi:
         self.posts = []
 
     def get(self, path):
-        if "/actions/workflows/grader.yml/runs" in path:
+        if f"/actions/workflows/{grader.WORKFLOW_FILE}/runs" in path:
             return {"workflow_runs": self.runs}
         return self.the_pr
 
@@ -242,66 +242,81 @@ class FakeApi:
 
 
 class Relay(unittest.TestCase):
-    def payload(self, body):
-        return {"action": "created", "issue": {"number": 7, "pull_request": {}}, "comment": {"body": body}}
+    def payload(self, body, assoc="OWNER", kind="User", action="created"):
+        return {"action": action, "issue": {"number": 7, "pull_request": {}},
+                "comment": {"body": body, "author_association": assoc, "user": {"login": AUTHOR, "type": kind}}}
 
-    def test_comment_verdict_reruns_latest_pr_grader_run(self):
+    def relay(self, api, body, minutes=45, **kw):
+        return grader.relay(api, CFG, "issue_comment", self.payload(body, **kw), now=lambda tz: CREATED + timedelta(minutes=minutes))
+
+    def test_comment_verdict_reruns_only_the_latest_pr_gate_run(self):
         runs = [{"id": 41, "event": "pull_request", "status": "completed", "head_sha": HEAD, "created_at": "2026-10-04T12:00:10Z"},
-                {"id": 42, "event": "pull_request_review", "status": "completed", "head_sha": HEAD, "created_at": "2026-10-04T12:05:00Z"},
+                {"id": 42, "event": "pull_request", "status": "completed", "head_sha": HEAD, "created_at": "2026-10-04T12:05:00Z"},
                 {"id": 43, "event": "workflow_dispatch", "status": "completed", "head_sha": HEAD, "created_at": "2026-10-04T12:09:00Z"},
                 {"id": 44, "event": "pull_request", "status": "completed", "head_sha": OLD, "created_at": "2026-10-04T12:10:00Z"}]
         api = FakeApi(pr(), [comment(f"Verdict: PASS {HEAD}")], runs=runs)
-        out = grader.relay(api, CFG, "issue_comment", self.payload(f"Verdict: PASS {HEAD}"),
-                           sleep=lambda s: None, now=lambda tz: CREATED + timedelta(minutes=45))
+        out = self.relay(api, f"Verdict: PASS {HEAD}")
         self.assertEqual(out["action"], "rerun")
-        self.assertEqual(api.posts, [("/repos/owner/repo/actions/runs/42/rerun", {}),
-                                     ("/repos/owner/repo/actions/runs/41/rerun", {})])
+        self.assertEqual(api.posts, [("/repos/owner/repo/actions/runs/42/rerun", {})])
 
-    def test_running_grader_run_is_not_rerun(self):
+    def test_running_latest_gate_run_is_left_to_read_the_verdict(self):
         runs = [{"id": 41, "event": "pull_request", "status": "completed", "head_sha": HEAD, "created_at": "2026-10-04T12:00:10Z"},
-                {"id": 42, "event": "pull_request_review", "status": "in_progress", "head_sha": HEAD, "created_at": "2026-10-04T12:05:00Z"}]
+                {"id": 42, "event": "pull_request", "status": "in_progress", "head_sha": HEAD, "created_at": "2026-10-04T12:05:00Z"}]
         api = FakeApi(pr(), [comment(f"Verdict: FAIL {HEAD}")], runs=runs)
-        grader.relay(api, CFG, "issue_comment", self.payload(f"Verdict: FAIL {HEAD}"),
-                     sleep=lambda s: None, now=lambda tz: CREATED + timedelta(minutes=45))
-        self.assertEqual(api.posts, [("/repos/owner/repo/actions/runs/41/rerun", {})])
+        out = self.relay(api, f"Verdict: FAIL {HEAD}")
+        self.assertEqual(out["action"], "skipped")
+        self.assertEqual(out["run_id"], 42)
+        self.assertEqual(api.posts, [])
 
     def test_no_pr_run_falls_back_to_dispatch_on_head_branch(self):
         api = FakeApi(pr(), [comment(f"Verdict: PASS {HEAD}")], runs=[])
-        out = grader.relay(api, CFG, "issue_comment", self.payload(f"Verdict: PASS {HEAD}"),
-                           sleep=lambda s: None, now=lambda tz: CREATED + timedelta(minutes=45))
+        out = self.relay(api, f"Verdict: PASS {HEAD}")
         self.assertEqual(out["action"], "dispatched")
-        self.assertEqual(api.posts, [("/repos/owner/repo/actions/workflows/grader.yml/dispatches",
+        self.assertEqual(api.posts, [("/repos/owner/repo/actions/workflows/gate.yml/dispatches",
                                       {"ref": "cursor/7-x", "inputs": {"pr": "7"}})])
 
-    def test_young_pass_waits_then_dispatches(self):
-        slept = []
+    def test_young_pass_defers_without_sleeping_or_rerunning(self):
         api = FakeApi(pr(), [comment(f"Verdict: PASS {HEAD}")])
-        out = grader.relay(api, CFG, "issue_comment", self.payload(f"Verdict: PASS {HEAD}"),
-                           sleep=slept.append, now=lambda tz: CREATED + timedelta(minutes=10))
-        self.assertEqual(slept, [20 * 60 + 5])
-        self.assertEqual(out["action"], "rerun")
-
-    def test_head_moved_while_waiting_skips(self):
-        api = FakeApi(pr(), [comment(f"Verdict: PASS {HEAD}")])
-
-        def moved(seconds):
-            api.the_pr = pr(head=OLD)
-
-        out = grader.relay(api, CFG, "issue_comment", self.payload(f"Verdict: PASS {HEAD}"),
-                           sleep=moved, now=lambda tz: CREATED + timedelta(minutes=10))
-        self.assertEqual(out["action"], "skipped")
+        out = self.relay(api, f"Verdict: PASS {HEAD}", minutes=10)
+        self.assertEqual(out["action"], "deferred")
+        self.assertEqual(out["eligible_at"], grader.stamp(CREATED + timedelta(minutes=30)))
+        self.assertIn("/grader", out["why"])
         self.assertEqual(api.posts, [])
+
+    def test_regrade_command_after_min_age_reruns(self):
+        api = FakeApi(pr(), [comment(f"Verdict: PASS {HEAD}")])
+        out = self.relay(api, "/grader", minutes=31)
+        self.assertEqual(out["action"], "rerun")
+        self.assertEqual(api.posts, [("/repos/owner/repo/actions/runs/41/rerun", {})])
+
+    def test_regrade_command_from_untrusted_or_bot_is_skipped(self):
+        for kw in ({"assoc": "NONE"}, {"kind": "Bot"}):
+            api = FakeApi(pr(), [comment(f"Verdict: PASS {HEAD}")])
+            out = self.relay(api, "/grader", **kw)
+            self.assertEqual(out["action"], "skipped", kw)
+            self.assertEqual(api.posts, [])
+
+    def test_regrade_prefix_word_is_not_a_command(self):
+        api = FakeApi(pr())
+        self.assertEqual(self.relay(api, "/graderish please")["action"], "skipped")
+
+    def test_relay_never_sleeps(self):
+        import inspect
+        self.assertNotIn("sleep", inspect.signature(grader.relay).parameters)
+        with open(grader.__file__, encoding="utf-8") as fh:
+            source = fh.read()
+        self.assertNotIn("sleep(", source)
+        self.assertNotIn("import time", source)
 
     def test_non_verdict_comment_is_skipped(self):
         api = FakeApi(pr())
-        out = grader.relay(api, CFG, "issue_comment", self.payload("looks good"), sleep=lambda s: None)
+        out = self.relay(api, "looks good")
         self.assertEqual(out["action"], "skipped")
 
-    def test_review_fail_reruns_earlier_green_runs(self):
+    def test_review_fail_reruns_earlier_green_run(self):
         api = FakeApi(pr(), reviews=[review(f"Verdict: FAIL {HEAD}")])
         payload = {"action": "submitted", "review": {"body": f"Verdict: FAIL {HEAD}"}, "pull_request": {"number": 7}}
-        out = grader.relay(api, CFG, "pull_request_review", payload, sleep=lambda s: None,
-                           now=lambda tz: CREATED + timedelta(minutes=45))
+        out = grader.relay(api, CFG, "pull_request_review", payload, now=lambda tz: CREATED + timedelta(minutes=45))
         self.assertEqual(out["action"], "rerun")
         self.assertEqual(api.posts, [("/repos/owner/repo/actions/runs/41/rerun", {})])
 
@@ -309,8 +324,7 @@ class Relay(unittest.TestCase):
         fork = pr()
         fork["head"]["repo"] = {"full_name": "someone/fork"}
         api = FakeApi(fork, [comment(f"Verdict: PASS {HEAD}")])
-        out = grader.relay(api, CFG, "issue_comment", self.payload(f"Verdict: PASS {HEAD}"),
-                           sleep=lambda s: None, now=lambda tz: CREATED + timedelta(minutes=45))
+        out = self.relay(api, f"Verdict: PASS {HEAD}")
         self.assertEqual(out["action"], "skipped")
 
 

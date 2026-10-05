@@ -6,11 +6,10 @@ Every workflow uses only the workflow `GITHUB_TOKEN` and runs on `ubuntu-latest`
 
 | Workflow | Trigger | What it does |
 |---|---|---|
-| `grader.yml` (check `grader`) | PR opened, synchronize, reopened, labeled, unlabeled, ready for review; review submitted, edited, dismissed; manual dispatch | FAILS unless a grader PASS with a valid `grader-run` ID names the current head SHA and the PR is old enough |
-| `grader-relay.yml` | a PR comment or review whose first line starts `Verdict: ` | re-runs the PR's own `grader` runs for the current head (so the result shows on the PR), waiting out the minimum age first when a PASS arrives early |
+| `gate.yml` (one job, check `grader`) | PR opened, edited, synchronize, reopened, ready for review; push to `main`; manual dispatch | one runner, one step per check: workflow lint (`tools/check_workflows.py`), No comments, PR body, the correction-loop unit tests, then the grader verdict. Every step runs even after an earlier one fails, and any failed step fails the job. The grader step FAILS unless a grader PASS with a valid `grader-run` ID names the current head SHA and the PR is old enough |
+| `grader-relay.yml` | a PR comment or review whose first line starts `Verdict: `, or a trusted PR comment whose first line is `/grader` | re-runs the PR's latest `gate` run for the current head (so the result shows on the PR). It never waits on the runner: a PASS that arrives before the PR is old enough is recorded and the relay exits |
 | `correction-intake.yml` | a watched workflow fails on `main`, a deployment fails, a grader FAIL, a Dread correction | opens an issue labeled `correction`, or comments on the open one with the same key |
 | `correction-close-gate.yml` | an issue labeled `correction` is closed | reopens it unless it links a merged level 1 or level 2 fix PR |
-| `correction-loop tests` | every PR and every push to `main` | unit tests for all of the above plus the issue forms |
 
 Code: `tools/correction_loop/` (Python stdlib; the tests also use PyYAML). Settings: `tools/correction_loop/config.json`.
 
@@ -59,10 +58,12 @@ grader-run: gr-20261004T221500Z-3f9a0c27d18e4b65
 Checked: proof links, CI runs, blast radius.
 ```
 
-Every new verdict makes `grader-relay` re-run each completed `grader` run of the PR for the current head (pull_request and
-review runs), so every `grader` entry on the PR shows the current answer. A PASS posted before the PR is 30 minutes old leaves
-the check red; `grader-relay` waits until the PR is old enough first (at most `max_relay_wait_minutes`).
-To re-run by hand: `gh run rerun <grader run id>` on the PR's latest `grader` run. `gh workflow run grader.yml --ref <head branch> -f pr=<N>`
+Every new verdict makes `grader-relay` re-run the PR's latest completed `gate` run for the current head, so the `grader`
+check on the PR shows the current answer. When that latest run is still in progress the relay leaves it alone: the grader step is
+the job's last step and reads the verdict itself. A PASS posted before the PR is 30 minutes old leaves the check red and the relay
+exits in seconds with `deferred` and the time the PR becomes eligible; nothing sleeps on a paid runner. Comment `/grader` on the
+PR at or after that time (or push) to re-run the gate.
+To re-run by hand: `gh run rerun <gate run id>` on the PR's latest `gate` run. `gh workflow run gate.yml --ref <head branch> -f pr=<N>`
 also works and checks that the branch tip is still the PR head, but a dispatched run is recorded on the commit only and is not listed in the PR's checks.
 
 Branch protection and rulesets are not changed by this repo's files. `grader` must be green before merge.
@@ -79,7 +80,7 @@ Branch protection and rulesets are not changed by this repo's files. `grader` mu
 
 Manual dispatch: `gh workflow run correction-intake.yml -f kind=correction -f target="<title>" -f body="<what was wrong>"`.
 
-Only the repo owner, members and collaborators trigger it; bot accounts never do. The root signature hashes the failed job,
+Only the repo owner, members and collaborators trigger it; bot accounts never do. Before any runner starts, the `signature` job's `if` drops comments and reviews that contain neither `Verdict: FAIL` nor `/correction`, issue events without the `dread-correction` label, successful or PR-branch workflow runs and non-failed deployments, so ordinary PR comments bill no minutes. The root signature hashes the failed job,
 the failed step and the root line of its log (failing test ids, else the first `##[error]` line with numbers and SHAs masked),
 so the same failure on another commit has the same key. An open issue with the same key gets a "Seen again" comment instead of
 a new issue; a closed one is named as "Repeat of" in the new issue. Two runs with the same key are serialized by a concurrency group.
@@ -107,6 +108,6 @@ recommendation, blast radius) and **Feature** (what it does for Dread, acceptanc
 ## Settings (`tools/correction_loop/config.json`)
 
 - `watched_workflows`: workflow names whose failure on `main` opens a correction issue. `correction-intake.yml` lists the same names; a test checks they match.
-- `required_checks`: workflows whose PR-branch failure also opens one (empty by default).
+- `required_checks`: workflows whose PR-branch failure also opens one (empty by default). `correction-intake.yml` skips PR-branch `workflow_run` events before a runner starts, so a non-empty list also needs the `github.event.workflow_run.event != 'pull_request'` clause removed; a test checks the two agree.
 - `watch_deployments`, `deploy_environments`: deployment failures (empty list means every environment).
-- `grader.min_pr_age_minutes`, `grader.min_sha_chars`, `grader.require_grader_run`, `grader.grader_run_max_age_hours`, `grader.grader_logins`, `grader.max_relay_wait_minutes`.
+- `grader.min_pr_age_minutes`, `grader.min_sha_chars`, `grader.require_grader_run`, `grader.grader_run_max_age_hours`, `grader.grader_logins`.
