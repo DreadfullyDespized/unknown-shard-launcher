@@ -29,12 +29,39 @@ GITHUB_REF_LINK = re.compile(r"^https?://(?:www\.)?github\.com/[^/]+/[^/]+/(blob
 SHA = re.compile(r"^[0-9a-f]{40}$")
 OPTION_START = re.compile(r"^(?:\s{0,1}(?:[-*+]|\d+[.)])\s+\S|###\s+\S)")
 BUG_TITLE = re.compile(r"^\s*fix(\([^)]*\))?!?:", re.I)
+PLACEHOLDER_WORDS = {"tbd", "tba", "tbc", "todo", "fixme", "xxx", "wip"}
+PLACEHOLDER_PHRASES = ("fill in", "fill me in", "fill this in", "to be determined", "to be decided", "to be confirmed", "coming soon")
+FENCE_OPEN = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+INLINE_CODE = re.compile(r"(`+)(?!`).*?(?<!`)\1", re.S)
+
+
+def strip_hidden(body):
+    body = HTML_NOTE.sub("", body.replace("\r\n", "\n"))
+    body = re.sub(r"<!--.*\Z", "", body, flags=re.S)
+    kept = []
+    fence = None
+    for line in body.split("\n"):
+        if fence is None:
+            m = FENCE_OPEN.match(line)
+            if m:
+                fence = m.group(1)
+                continue
+            kept.append(line)
+        elif re.match(r"^ {0,3}" + re.escape(fence[0]) + "{" + str(len(fence)) + r",}\s*$", line):
+            fence = None
+    return "\n".join(kept)
+
+
+def has_placeholder_word(text):
+    words = re.findall(r"[a-z0-9]+", normalize(INLINE_CODE.sub(" ", text)))
+    joined = " ".join(words)
+    return any(w in PLACEHOLDER_WORDS for w in words) or any(re.search(r"\b" + p + r"\b", joined) for p in PLACEHOLDER_PHRASES)
 
 
 def sections(body):
     found = {}
     current = None
-    for line in body.replace("\r\n", "\n").split("\n"):
+    for line in strip_hidden(body).split("\n"):
         m = HEADING.match(line)
         if m and not line.startswith("###"):
             current = m.group(1).strip().lower()
@@ -56,6 +83,8 @@ def normalize(text):
 def is_real_text(text, placeholders=PLACEHOLDERS, minimum=5):
     normalized = normalize(text)
     if not normalized or normalized in placeholders:
+        return False
+    if has_placeholder_word(text):
         return False
     if all(part.strip(" .,:;") in placeholders or not part.strip(" .,:;") for part in re.split(r"[\n,;]", normalized)):
         return False
@@ -95,7 +124,7 @@ def option_blocks(text):
 
 
 def is_bug_pr(title, labels):
-    return bool(BUG_TITLE.match(title or "")) or any(l.strip().lower() in BUG_LABELS for l in labels)
+    return bool(BUG_TITLE.match(title or "")) or any(BUG_LABELS & set(re.findall(r"[a-z]+", l.lower())) for l in labels)
 
 
 def check(body, title="", labels=()):
@@ -210,6 +239,19 @@ SELF_TEST_CASES = (
     (GOOD + BUG_EXTRA.split("\n- Reject")[0] + "\n", "fix: x", (), False),
     (GOOD + BUG_EXTRA.replace(": https://github.com/o/r/issues/4", " only"), "fix: x", (), False),
     (GOOD + BUG_EXTRA.split("\n## Options")[0] + "\n## Options\n### A\nKeep it: %s\n### B\nDrop it: %s\n" % (RUN, RUN), "", ("correction",), True),
+    (GOOD_DREAD + "## Blast radius\nTBD later\n", "", (), False),
+    (GOOD_DREAD + "## Blast radius\nTBD - will fill in\n", "", (), False),
+    (GOOD_DREAD + "## Blast radius\ntbd tbd\n", "", (), False),
+    (GOOD_DREAD + "<!--\n## Blast radius\nCI only, nothing runtime.\n-->\n", "", (), False),
+    (GOOD_DREAD + "```\n## Blast radius\nCI only, nothing runtime.\n```\n", "", (), False),
+    ("<!--\n## For Dread\n**Ask:** Nothing.\n**What changes for you:** x y z\n**Proof:** %s\n**NOT done:** none\n-->\n" % RUN + GOOD_BLAST, "", (), False),
+    ("~~~md\n" + GOOD_DREAD + "~~~\n" + GOOD_BLAST, "", (), False),
+    (GOOD_DREAD + "## Blast radius\nCI only.\n<!-- unclosed note\n## Test\n", "", (), True),
+    (GOOD_DREAD + "## Blast radius\nCI only; the workflow rejects `TBD` and `todo` as text.\n", "", (), True),
+    (GOOD_DREAD + "## Blast radius\nOnly the checker.\n```sh\n## Blast radius\n```\n", "", (), True),
+    (dread(notdone="Will fill in later.") + GOOD_BLAST, "", (), False),
+    (GOOD, "Add check", ("type: bug",), False),
+    (GOOD, "Add check", ("debugging",), True),
 )
 
 

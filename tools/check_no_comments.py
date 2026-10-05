@@ -26,7 +26,6 @@ GLOBAL_EXEMPT_PATHS = (
     "*.import",
     "*.tscn",
     "*.tres",
-    "*.md",
     "LICENSE*",
     "package-lock.json",
     "project.godot",
@@ -65,6 +64,7 @@ MIRC = {".mrc", ".ini_mirc"}
 LUA = {".lua"}
 SQL = {".sql"}
 BATCH = {".bat", ".cmd"}
+MARKDOWN = {".md", ".markdown"}
 NAMED = {"Dockerfile": "shell", "Makefile": "shell", ".prettierrc": "c"}
 
 
@@ -77,7 +77,7 @@ def language_for(path, text):
         (C_LIKE, "c"), (JS_LIKE, "js"), (JSX_LIKE, "jsx"), (GO_LIKE, "go"), (CSS_LIKE, "css"), (SCSS_LIKE, "c"),
         (PY_LIKE, "py"), (SHELL_LIKE, "shell"), (POWERSHELL, "powershell"), (YAML_LIKE, "yaml"),
         (INI_LIKE, "ini"), (XML_LIKE, "xml"), (AHK, "ahk"), (MIRC, "mirc"), (LUA, "lua"),
-        (SQL, "sql"), (BATCH, "batch"),
+        (SQL, "sql"), (BATCH, "batch"), (MARKDOWN, "markdown"),
     ):
         if ext in group:
             return "cs" if ext == ".cs" else lang
@@ -520,10 +520,67 @@ def is_exempt(path):
     return False
 
 
+FENCE_LANGUAGES = {
+    "sh": "shell", "bash": "shell", "shell": "shell", "zsh": "shell", "ksh": "shell", "dash": "shell",
+    "dockerfile": "shell", "docker": "shell", "makefile": "shell", "make": "shell",
+    "powershell": "powershell", "pwsh": "powershell", "ps1": "powershell", "ps": "powershell",
+    "python": "py", "python3": "py", "py": "py", "gdscript": "py", "gd": "py", "toml": "py", "ruby": "py", "rb": "py",
+    "js": "js", "javascript": "js", "mjs": "js", "cjs": "js", "ts": "js", "typescript": "js", "node": "js",
+    "jsx": "jsx", "tsx": "jsx",
+    "c": "c", "h": "c", "cpp": "c", "c++": "c", "java": "c", "kotlin": "c", "kt": "c", "swift": "c",
+    "json": "c", "jsonc": "c", "json5": "c", "glsl": "c", "hlsl": "c", "gdshader": "c", "scss": "c", "less": "c",
+    "cs": "cs", "csharp": "cs", "c#": "cs",
+    "go": "go", "golang": "go", "css": "css",
+    "yaml": "yaml", "yml": "yaml",
+    "ini": "ini", "cfg": "ini", "conf": "ini", "properties": "ini",
+    "xml": "xml", "html": "xml", "svg": "xml", "xaml": "xml", "vue": "xml",
+    "sql": "sql", "lua": "lua", "bat": "batch", "batch": "batch", "cmd": "batch",
+    "ahk": "ahk", "autohotkey": "ahk",
+}
+FENCE_OPEN = re.compile(r"^( {0,3})(`{3,}|~{3,})[ \t]*([^\s`{]*)")
+
+
+def fenced_blocks(text):
+    lines = text.split("\n")
+    blocks = []
+    i = 0
+    while i < len(lines):
+        m = FENCE_OPEN.match(lines[i])
+        if not m:
+            i += 1
+            continue
+        fence = m.group(2)
+        tag = m.group(3).strip().lower().lstrip(".")
+        close = re.compile(r"^ {0,3}" + re.escape(fence[0]) + "{" + str(len(fence)) + r",}[ \t]*$")
+        j = i + 1
+        while j < len(lines) and not close.match(lines[j].rstrip("\r")):
+            j += 1
+        blocks.append((tag, i + 2, "\n".join(lines[i + 1:j]) + "\n"))
+        i = j + 1
+    return blocks
+
+
+def markdown_comments(text):
+    newlines = [k for k, ch in enumerate(text) if ch == "\n"]
+    results = []
+    for tag, first_line, block in fenced_blocks(text):
+        lang = FENCE_LANGUAGES.get(tag)
+        if lang is None:
+            continue
+        offset = newlines[first_line - 2] + 1
+        for first, last, body, start, end in SCANNERS[lang](block, lang):
+            if directive_name(body, first):
+                continue
+            results.append((first + first_line - 1, last + first_line - 1, body, start + offset, end + offset))
+    return results
+
+
 def find_comments(path, text):
     lang = language_for(path, text)
     if lang is None:
         return []
+    if lang == "markdown":
+        return markdown_comments(text)
     results = []
     for first, last, body, start, end in SCANNERS[lang](text, lang):
         if directive_name(body, first):
@@ -640,6 +697,14 @@ SELF_TEST_CASES = (
     ("a.sql", "SELECT '--no' FROM t; -- c\n", [1]),
     ("a.bat", "@echo off\nrem c\n:: c\nREM c\necho rem\n", [2, 3, 4]),
     ("a.md", "# Heading\n", []),
+    ("a.md", "# Title\n\n```sh\necho hi # note\nls\n```\n", [4]),
+    ("a.md", "```bash\n#!/bin/bash\n# shellcheck disable=SC2086\necho \"#x\" a#b\n```\n", []),
+    ("a.md", "```\n# untagged fence is not scanned\n```\n~~~python\nx = 1  # c\n~~~\n", [5]),
+    ("a.md", "````md\n```sh\n# example inside a markdown fence\n```\n````\n", []),
+    ("a.md", "```powershell\n$a = 1 # c\n```\n\n```js\nconst u = 'http://x'; // c\n```\n", [2, 6]),
+    ("a.md", "  ```yaml\n  key: v # c\n  ```\n```ts {title=x}\n/* c */\n```\n", [2, 5]),
+    ("a.md", "Text # not code\n<!-- html note -->\n```sh\nls\n", []),
+    ("a.md", "```sh\nls\n# unclosed fence runs to end of file\n", [3]),
 )
 
 
@@ -652,8 +717,9 @@ DIFF_TEST_HEAD = {
     "edit.ts": "export const a = 1;\n// added comment\nexport const b = '//not';\n",
     "new.sh": "#!/bin/sh\n# shellcheck disable=SC2086\necho hi # added\n",
     "node_modules/x/index.js": "// vendored\n",
+    "docs/run.md": "# Run\n\n```sh\nmake test # added\n```\n",
 }
-DIFF_TEST_EXPECTED = [("edit.ts", 2), ("new.sh", 3)]
+DIFF_TEST_EXPECTED = [("docs/run.md", 4), ("edit.ts", 2), ("new.sh", 3)]
 
 
 def diff_self_test():
@@ -684,7 +750,7 @@ def self_test():
         if got != expected:
             failures += 1
             print("FAIL %s %r: expected %s got %s" % (path, text, expected, got))
-    exempt_cases = (("node_modules/x/a.js", True), (".vercel/output/a.mjs", True), ("src/a.ts", False), ("README.md", True))
+    exempt_cases = (("node_modules/x/a.js", True), (".vercel/output/a.mjs", True), ("src/a.ts", False), ("README.md", False), ("node_modules/x/README.md", True))
     for path, expected in exempt_cases:
         if is_exempt(path) != expected:
             failures += 1
