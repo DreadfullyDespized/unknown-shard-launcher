@@ -2,14 +2,32 @@
 import argparse
 import bisect
 import fnmatch
+import json
 import os
 import re
 import subprocess
 import sys
 import tempfile
 
-EXEMPT_PATHS = (
-)
+CONFIG_NAME = "no-comments.json"
+
+
+def load_repo_config():
+    path = os.environ.get("NO_COMMENTS_CONFIG") or os.path.join(os.path.dirname(os.path.abspath(__file__)), CONFIG_NAME)
+    if not os.path.exists(path):
+        raise SystemExit("%s not found; every repo ships its per-repo settings there (use empty lists for none)." % path)
+    with open(path, encoding="utf-8") as handle:
+        data = json.load(handle)
+    unknown = set(data) - {"exempt_paths", "directives", "self_test_cases"}
+    if unknown:
+        raise SystemExit("%s: unknown keys %s" % (path, sorted(unknown)))
+    return data
+
+
+REPO_CONFIG = load_repo_config()
+EXEMPT_PATHS = tuple(REPO_CONFIG.get("exempt_paths", ()))
+REPO_DIRECTIVES = tuple((d["name"], d["pattern"], d.get("max_line")) for d in REPO_CONFIG.get("directives", ()))
+REPO_SELF_TEST_CASES = tuple((c["path"], c["text"], c["comment_lines"]) for c in REPO_CONFIG.get("self_test_cases", ()))
 
 GLOBAL_EXEMPT_PATHS = (
     ".git/*",
@@ -499,7 +517,7 @@ SCANNERS = {
     "lua": scan_lua, "sql": scan_sql,
 }
 
-COMPILED_DIRECTIVES = tuple((name, re.compile(pattern), limit) for name, pattern, limit in DIRECTIVES)
+COMPILED_DIRECTIVES = tuple((name, re.compile(pattern), limit) for name, pattern, limit in DIRECTIVES + REPO_DIRECTIVES)
 
 
 def directive_name(comment_text, line):
@@ -745,7 +763,7 @@ def diff_self_test():
 
 def self_test():
     failures = diff_self_test()
-    for path, text, expected in SELF_TEST_CASES:
+    for path, text, expected in SELF_TEST_CASES + REPO_SELF_TEST_CASES:
         got = sorted({n for first, last, _b, _s, _e in find_comments(path, text) for n in range(first, last + 1)})
         if got != expected:
             failures += 1
@@ -755,11 +773,28 @@ def self_test():
         if is_exempt(path) != expected:
             failures += 1
             print("FAIL exempt %s: expected %s" % (path, expected))
+    with tempfile.TemporaryDirectory() as tmp:
+        bad = os.path.join(tmp, CONFIG_NAME)
+        with open(bad, "w", encoding="utf-8") as handle:
+            handle.write('{"exempt_path": []}')
+        saved = os.environ.get("NO_COMMENTS_CONFIG")
+        os.environ["NO_COMMENTS_CONFIG"] = bad
+        try:
+            load_repo_config()
+            failures += 1
+            print("FAIL config with an unknown key was accepted")
+        except SystemExit:
+            pass
+        finally:
+            if saved is None:
+                os.environ.pop("NO_COMMENTS_CONFIG")
+            else:
+                os.environ["NO_COMMENTS_CONFIG"] = saved
     for path in EXEMPT_PATHS:
         if not is_exempt(path.rstrip("*").rstrip("/") + ("/x" if path.endswith("/*") else "")):
             failures += 1
             print("FAIL exempt list entry %s does not match itself" % path)
-    print("self-test: %d cases, %d failures" % (1 + len(SELF_TEST_CASES) + len(exempt_cases) + len(EXEMPT_PATHS), failures))
+    print("self-test: %d cases, %d failures" % (2 + len(SELF_TEST_CASES) + len(REPO_SELF_TEST_CASES) + len(exempt_cases) + len(EXEMPT_PATHS), failures))
     return failures == 0
 
 
