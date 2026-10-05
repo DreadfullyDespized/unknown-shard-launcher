@@ -130,7 +130,7 @@ class Scanner:
         return self.n
 
 
-JSX_TEXT_BEFORE = re.compile(r"(<[A-Za-z][\w.:-]*(\s[^<>]*)?>|</[\w.:-]*>|<>)[^{}<>;]*$")
+JSX_TEXT_BEFORE = re.compile(r"(<[A-Za-z][\w.:-]*(\s[^<>]*)?>|</[\w.:-]*>|<>)[^{}()<>;=]*$")
 REGEX_PRECEDERS = set("(,=:[!&|?{};+-*%<>~^")
 REGEX_KEYWORDS = {"return", "typeof", "instanceof", "in", "of", "new", "delete", "void", "throw", "case", "do", "else", "yield", "await"}
 
@@ -621,7 +621,7 @@ SELF_TEST_CASES = (
     ("a.ts", "// eslint-disable-next-line no-x -- because\n", [1]),
     ("a.ts", "// @ts-ignore\n// @ts-nocheck why\n", [1, 2]),
     ("a.ts", "const d = a / b; const e = c / d; // x\n", [1]),
-    ("a.tsx", "const a = <span> // {tag}</span>;\nconst b = <div>{/* real */}</div>;\nconst c = x > y; // real\n", [2, 3]),
+    ("a.tsx", "const a = <span> // {tag}</span>;\nconst b = <div>{/* real */}</div>;\nconst c = x > y; // real\nconst [n, setN] = useState<number>(0); // real\n", [2, 3, 4]),
     ("a.css", "a { background: url(http://x/y.png); }\n/* c */\n", [2]),
     ("a.go", "s := `//raw`\n// c\n", [2]),
     ("a.sh", "#!/bin/bash\necho \"#x\" '$#' ${#arr[@]} a#b\ncat <<EOF\n# heredoc\nEOF\nls # c\n", [6]),
