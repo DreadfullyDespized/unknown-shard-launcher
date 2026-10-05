@@ -4,7 +4,6 @@ import os
 import re
 import secrets
 import sys
-import time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -21,7 +20,8 @@ RUN_LINE_RX = re.compile(r"^grader-run: (\S+)\s*$", re.M)
 RUN_ID_RX = re.compile(r"^gr-(\d{8}T\d{6}Z)-([0-9a-f]{16})$")
 RUN_STAMP = "%Y%m%dT%H%M%SZ"
 CLOCK_SKEW = timedelta(minutes=2)
-WORKFLOW_FILE = "grader.yml"
+WORKFLOW_FILE = "gate.yml"
+REGRADE_COMMAND = "/grader"
 
 
 def load_config(path=None):
@@ -217,12 +217,23 @@ def check(api, cfg, event_name, payload, now=None):
     return evaluate(pr, head, items, now or datetime.now(timezone.utc), cfg, head_time=head_time_of(api, head))
 
 
+def is_regrade_command(comment):
+    line = (comment.get("body") or "").replace("\r\n", "\n").lstrip().split("\n", 1)[0].strip()
+    if line != REGRADE_COMMAND and not line.startswith(REGRADE_COMMAND + " "):
+        return False
+    user = comment.get("user") or {}
+    if user.get("type") == "Bot" or (user.get("login") or "").endswith("[bot]"):
+        return False
+    return comment.get("author_association") in TRUSTED
+
+
 def relay_target(event_name, payload):
     if event_name == "issue_comment":
         issue = payload.get("issue") or {}
         if "pull_request" not in issue or payload.get("action") not in ("created", "edited"):
             return None
-        if not parse_verdict((payload.get("comment") or {}).get("body")):
+        comment = payload.get("comment") or {}
+        if not parse_verdict(comment.get("body")) and not is_regrade_command(comment):
             return None
         return issue["number"]
     if event_name == "pull_request_review":
@@ -232,8 +243,7 @@ def relay_target(event_name, payload):
     return None
 
 
-PR_RUN_EVENTS = ("pull_request", "pull_request_review")
-MAX_RERUNS = 20
+PR_RUN_EVENTS = ("pull_request",)
 
 
 def retrigger(api, pr):
@@ -242,40 +252,34 @@ def retrigger(api, pr):
         return {"action": "skipped", "why": "PR head is in another repository"}
     sha = head.get("sha")
     runs = (api.get(f"/repos/{api.repo}/actions/workflows/{WORKFLOW_FILE}/runs?head_sha={sha}&per_page=100") or {}).get("workflow_runs") or []
-    mine = [r for r in runs if r.get("event") in PR_RUN_EVENTS and r.get("head_sha") == sha]
-    done = sorted((r for r in mine if r.get("status") == "completed"),
-                  key=lambda r: (r.get("created_at") or "", r.get("id") or 0), reverse=True)[:MAX_RERUNS]
-    if done:
-        for run in done:
-            api.post(f"/repos/{api.repo}/actions/runs/{run['id']}/rerun", {})
-        return {"action": "rerun", "run_ids": [r["id"] for r in done], "head_sha": sha, "pr": pr["number"]}
+    mine = sorted((r for r in runs if r.get("event") in PR_RUN_EVENTS and r.get("head_sha") == sha),
+                  key=lambda r: (r.get("created_at") or "", r.get("id") or 0), reverse=True)
+    if mine:
+        latest = mine[0]
+        if latest.get("status") != "completed":
+            return {"action": "skipped", "run_id": latest["id"], "head_sha": sha, "pr": pr["number"],
+                    "why": "the latest gate run is still running; its grader step is the last step and reads the verdict"}
+        api.post(f"/repos/{api.repo}/actions/runs/{latest['id']}/rerun", {})
+        return {"action": "rerun", "run_ids": [latest["id"]], "head_sha": sha, "pr": pr["number"]}
     api.post(f"/repos/{api.repo}/actions/workflows/{WORKFLOW_FILE}/dispatches",
              {"ref": head.get("ref"), "inputs": {"pr": str(pr["number"])}})
     return {"action": "dispatched", "ref": head.get("ref"), "head_sha": sha, "pr": pr["number"]}
 
 
-def relay(api, cfg, event_name, payload, sleep=time.sleep, now=datetime.now):
+def relay(api, cfg, event_name, payload, now=datetime.now):
     found = relay_target(event_name, payload)
     if not found:
-        return {"action": "skipped", "why": "no Verdict line on a pull request"}
+        return {"action": "skipped", "why": "no Verdict line or trusted /grader command on a pull request"}
     number = found
     pr, items = fetch(api, number)
     head = (pr.get("head") or {}).get("sha") or ""
     result = evaluate(pr, head, items, now(timezone.utc), cfg, head_time=head_time_of(api, head))
-    waited = 0
     if result.get("waiting"):
-        cap = int(cfg.get("max_relay_wait_minutes", 30)) * 60
-        if result["wait_seconds"] > cap:
-            return {"action": "skipped", "why": f"PASS is recorded but the wait is over {cap // 60} minutes; re-run grader later",
-                    "result": result}
-        waited = result["wait_seconds"] + 5
-        sleep(waited)
-        pr, items = fetch(api, number)
-        if (pr.get("head") or {}).get("sha") != head:
-            return {"action": "skipped", "why": "the PR head moved while waiting; that push re-runs grader"}
-    out = retrigger(api, pr)
-    out["waited_seconds"] = waited
-    return out
+        return {"action": "deferred", "eligible_at": result["eligible_at"], "pr": number, "head_sha": head,
+                "why": (f"PASS is recorded but the PR is younger than {result['min_pr_age_minutes']} minutes; "
+                        f"the relay does not wait on a paid runner. Comment {REGRADE_COMMAND} on the PR at or after "
+                        f"{local(parse_time(result['eligible_at']), cfg.get('timezone') or 'America/Chicago')} to re-run the gate")}
+    return retrigger(api, pr)
 
 
 def main(argv=None):

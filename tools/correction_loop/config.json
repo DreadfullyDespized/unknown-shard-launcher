@@ -1,7 +1,7 @@
 {
   "watched_workflows": [
     "CI",
-    "correction-loop tests"
+    "gate"
   ],
   "required_checks": [],
   "watch_deployments": true,
@@ -16,7 +16,6 @@
     "grader_run_max_age_hours": 24,
     "grader_logins": [
       "DreadfullyDespized"
-    ],
-    "max_relay_wait_minutes": 30
+    ]
   }
 }

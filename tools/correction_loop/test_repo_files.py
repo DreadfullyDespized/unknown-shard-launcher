@@ -9,7 +9,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 WF = os.path.join(ROOT, ".github", "workflows")
 FORMS = os.path.join(ROOT, ".github", "ISSUE_TEMPLATE")
-OURS = ["grader.yml", "grader-relay.yml", "correction-intake.yml", "correction-close-gate.yml", "correction-loop-tests.yml"]
+OURS = ["gate.yml", "grader-relay.yml", "correction-intake.yml", "correction-close-gate.yml"]
+RETIRED = ["grader.yml", "correction-loop-tests.yml", "no-comments.yml", "pr-body.yml"]
+GATE_STEPS = ["Workflow lint: self-test", "No comments: self-test", "No comments: fail on added comment lines", "PR body: self-test",
+              "correction-loop tests", "grader: fail unless"]
 FORM_TYPES = {"markdown", "textarea", "input", "dropdown", "checkboxes"}
 
 
@@ -32,14 +35,53 @@ class Workflows(unittest.TestCase):
             for job in load(os.path.join(WF, name))["jobs"].values():
                 self.assertEqual(job["runs-on"], "ubuntu-latest", name)
 
-    def test_grader_job_is_named_grader_and_reruns_on_events(self):
-        doc = load(os.path.join(WF, "grader.yml"))
+    def test_every_job_has_a_timeout(self):
+        for name in os.listdir(WF):
+            if name.endswith((".yml", ".yaml")):
+                for job_id, job in load(os.path.join(WF, name))["jobs"].items():
+                    self.assertIn("timeout-minutes", job, f"{name}:{job_id}")
+
+    def test_gate_is_one_job_named_grader_with_one_step_per_check(self):
+        doc = load(os.path.join(WF, "gate.yml"))
         self.assertEqual([j["name"] for j in doc["jobs"].values()], ["grader"])
         on = triggers(doc)
-        self.assertTrue({"synchronize", "labeled", "unlabeled", "opened", "reopened"} <= set(on["pull_request"]["types"]))
-        self.assertIn("submitted", on["pull_request_review"]["types"])
+        types = set(on["pull_request"]["types"])
+        self.assertTrue({"opened", "edited", "synchronize", "reopened"} <= types)
+        self.assertFalse({"labeled", "unlabeled"} & types)
+        self.assertNotIn("pull_request_review", on)
+        self.assertEqual(on["push"]["branches"], ["main"])
         self.assertIn("pr", on["workflow_dispatch"]["inputs"])
         self.assertNotIn("continue-on-error", json.dumps(doc))
+        steps = list(doc["jobs"].values())[0]["steps"]
+        names = [s.get("name") or "" for s in steps]
+        for want in GATE_STEPS:
+            self.assertTrue(any(n.startswith(want) for n in names), want)
+        self.assertTrue(names[-1].startswith("grader:"))
+        checks = [s for s in steps if (s.get("name") or "").split(":")[0] in ("Workflow lint", "No comments", "PR body", "correction-loop tests", "grader")]
+        for step in checks:
+            self.assertIn("!cancelled()", step.get("if", ""), step["name"])
+
+    def test_old_per_check_workflows_are_gone(self):
+        for name in RETIRED:
+            self.assertFalse(os.path.exists(os.path.join(WF, name)), name)
+
+    def test_relay_reruns_on_events_and_never_waits(self):
+        doc = load(os.path.join(WF, "grader-relay.yml"))
+        on = triggers(doc)
+        self.assertIn("created", on["issue_comment"]["types"])
+        self.assertTrue({"submitted", "dismissed"} <= set(on["pull_request_review"]["types"]))
+        job = doc["jobs"]["relay"]
+        self.assertLessEqual(int(job["timeout-minutes"]), 5)
+        self.assertIn("/grader", job["if"])
+
+    def test_intake_never_starts_a_runner_for_events_it_ignores(self):
+        with open(os.path.join(HERE, "config.json"), encoding="utf-8") as fh:
+            cfg = json.load(fh)
+        cond = load(os.path.join(WF, "correction-intake.yml"))["jobs"]["signature"]["if"]
+        self.assertEqual(cfg["required_checks"], [])
+        self.assertIn("github.event.workflow_run.event != 'pull_request'", cond)
+        for marker in ("Verdict: FAIL", "/correction", "dread-correction"):
+            self.assertIn(marker, cond)
 
     def test_intake_watches_exactly_the_configured_workflows(self):
         with open(os.path.join(HERE, "config.json"), encoding="utf-8") as fh:

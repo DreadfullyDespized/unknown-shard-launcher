@@ -1,2 +1,3 @@
 Agents: read [CONTRIBUTING.md](CONTRIBUTING.md) first; it has the process, the Agent guardrails, and the commands to run every check locally.
 Dev environment: open `.devcontainer/devcontainer.json` (VS Code Dev Containers or Codespaces) to get the pinned toolchain: .NET 8 SDK + Python 3.12 + gh. `dotnet build ShardLauncher.sln -c Release` and `dotnet test ShardLauncher.sln -c Release --no-build` work there, because the WinForms project sets `EnableWindowsTargeting`; the launcher exe itself only runs on Windows.
+- **Before pushing:** install the pre-push gate once with `sh tools/hooks/install`; it runs the gate job's steps locally. Batch commits and push once per locally green change (CONTRIBUTING.md, "CI minutes").
