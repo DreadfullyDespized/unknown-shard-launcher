@@ -9,7 +9,7 @@
   "docs": "docs/correction-loop.md",
   "timezone": "America/Chicago",
   "grader": {
-    "min_pr_age_minutes": 30,
+    "min_pr_age_minutes": 3,
     "min_sha_chars": 12,
     "grader_logins": [
       "DreadfullyDespized"
