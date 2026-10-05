@@ -1,6 +1,7 @@
 name: correction-close-gate
 
 on:
+  pull_request:
   issues:
     types: [closed]
   workflow_dispatch:
