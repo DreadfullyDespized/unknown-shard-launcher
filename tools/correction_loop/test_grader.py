@@ -11,11 +11,12 @@ HEAD = "0123456789abcdef0123456789abcdef01234567"
 OLD = "fedcba9876543210fedcba9876543210fedcba98"
 CREATED = datetime(2026, 10, 4, 12, 0, tzinfo=timezone.utc)
 CFG = {"min_pr_age_minutes": 30, "grader_logins": ["DreadfullyDespized"], "min_sha_chars": 12,
-       "max_relay_wait_minutes": 30}
+       "exclude_pr_author": True, "max_relay_wait_minutes": 30}
+AUTHOR = "doer-agent"
 
 
-def pr(state="open", head=HEAD):
-    return {"number": 7, "state": state, "created_at": grader.stamp(CREATED),
+def pr(state="open", head=HEAD, author=AUTHOR):
+    return {"number": 7, "state": state, "created_at": grader.stamp(CREATED), "user": {"login": author, "type": "User"},
             "head": {"sha": head, "ref": "cursor/7-x", "repo": {"full_name": "owner/repo"}}}
 
 
@@ -49,6 +50,25 @@ class Verdicts(unittest.TestCase):
 
     def test_pass_with_twelve_char_prefix_passes(self):
         self.assertTrue(run([comment(f"Verdict: PASS {HEAD[:12]} all proof links checked")])["ok"])
+
+    def test_pass_from_pr_author_is_ignored(self):
+        r = run([comment(f"Verdict: PASS {HEAD}")], the_pr=pr(author="DreadfullyDespized"))
+        self.assertFalse(r["ok"])
+        self.assertIn("PR author", r["considered"][0]["ignored"])
+
+    def test_pr_author_match_ignores_case(self):
+        r = run([comment(f"Verdict: PASS {HEAD}")], the_pr=pr(author="dreadfullydespized"))
+        self.assertFalse(r["ok"])
+
+    def test_pass_from_other_grader_with_empty_logins_passes(self):
+        cfg = dict(CFG, grader_logins=[])
+        r = run([comment(f"Verdict: PASS {HEAD}", login="grader-bob", assoc="COLLABORATOR")], cfg=cfg)
+        self.assertTrue(r["ok"], r["reason"])
+
+    def test_untrusted_other_login_still_ignored_with_empty_logins(self):
+        cfg = dict(CFG, grader_logins=[])
+        r = run([comment(f"Verdict: PASS {HEAD}", login="stranger", assoc="NONE")], cfg=cfg)
+        self.assertFalse(r["ok"])
 
     def test_short_sha_is_ignored(self):
         r = run([comment(f"Verdict: PASS {HEAD[:7]}")])

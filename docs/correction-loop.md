@@ -21,12 +21,16 @@ Code: `tools/correction_loop/` (Python stdlib; the tests also use PyYAML). Setti
 1. A PR comment or PR review has the FIRST line `Verdict: PASS <sha>`, where `<sha>` is at least `min_sha_chars` (12) hex
    characters of the PR's current head commit. Text after the SHA on the same line is allowed.
 2. It is the latest verdict that names the current head. A later `Verdict: FAIL <sha>` for the same head turns the check red again.
-3. Its author is in `grader_logins`, is the repo owner, a member or a collaborator, and is not a bot account. Dismissed reviews do not count.
+3. Its author is not the PR author, is the repo owner, a member or a collaborator, is not a bot account, and is in `grader_logins`
+   when that list is not empty (it is empty by default, so any such collaborator can grade). Dismissed reviews do not count.
    An edited comment counts at the time of its last edit.
 4. The PR was opened at least `min_pr_age_minutes` (30) minutes ago.
 
-Why a SHA on the Verdict line: every agent pushes and comments as DreadfullyDespized, so the author name cannot tell the
-grader from the doer. Commits never carry a verdict, and a PASS cannot be written before the commit it names exists, so any
+Why the PR author is excluded: the doer cannot grade their own PR. Agents that open PRs as DreadfullyDespized therefore
+need a grader on a different GitHub account (a collaborator), or Dread can set `exclude_pr_author` to `false` in
+`tools/correction_loop/config.json`.
+
+Why a SHA on the Verdict line: commits never carry a verdict, and a PASS cannot be written before the commit it names exists, so any
 new push makes the old PASS stale and the check goes red until the grader re-grades the new head.
 
 Verdicts without a SHA, with a short SHA or with another commit's SHA are listed under `considered` in the run summary with the reason they were ignored.
@@ -88,4 +92,4 @@ recommendation, blast radius) and **Feature** (what it does for Dread, acceptanc
 - `watched_workflows`: workflow names whose failure on `main` opens a correction issue. `correction-intake.yml` lists the same names; a test checks they match.
 - `required_checks`: workflows whose PR-branch failure also opens one (empty by default).
 - `watch_deployments`, `deploy_environments`: deployment failures (empty list means every environment).
-- `grader.min_pr_age_minutes`, `grader.min_sha_chars`, `grader.grader_logins`, `grader.max_relay_wait_minutes`.
+- `grader.min_pr_age_minutes`, `grader.min_sha_chars`, `grader.exclude_pr_author`, `grader.grader_logins`, `grader.max_relay_wait_minutes`.

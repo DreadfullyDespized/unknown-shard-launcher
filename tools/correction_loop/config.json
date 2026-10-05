@@ -12,9 +12,8 @@
   "grader": {
     "min_pr_age_minutes": 30,
     "min_sha_chars": 12,
-    "grader_logins": [
-      "DreadfullyDespized"
-    ],
+    "exclude_pr_author": true,
+    "grader_logins": [],
     "max_relay_wait_minutes": 30
   }
 }

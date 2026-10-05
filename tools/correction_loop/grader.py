@@ -57,11 +57,13 @@ def verdict_items(reviews, comments):
     return [i for i in items if i["at"] and i.get("state") != "DISMISSED"]
 
 
-def ignore_reason(item, cfg, head_sha):
+def ignore_reason(item, cfg, head_sha, pr_author=""):
     user = item["user"]
     login = user.get("login") or ""
     if user.get("type") == "Bot" or login.endswith("[bot]"):
         return "posted by a bot"
+    if cfg.get("exclude_pr_author", True) and pr_author and login.lower() == pr_author.lower():
+        return f"{login} is the PR author; a grader must be someone else"
     if item["association"] not in TRUSTED:
         return f"author association {item['association']} is not owner, member or collaborator"
     logins = cfg.get("grader_logins") or []
@@ -80,11 +82,12 @@ def ignore_reason(item, cfg, head_sha):
 def evaluate(pr, head_sha, items, now, cfg, tz="America/Chicago"):
     considered = []
     applicable = []
+    pr_author = (pr.get("user") or {}).get("login") or ""
     for item in sorted(items, key=lambda i: (i["at"], str(i["id"]))):
         parsed = parse_verdict(item["body"])
         if not parsed:
             continue
-        why = ignore_reason(item, cfg, head_sha)
+        why = ignore_reason(item, cfg, head_sha, pr_author)
         considered.append({"verdict": parsed[0], "kind": item["kind"], "url": item["url"], "at": item["at"],
                            "login": item["user"].get("login"), "ignored": why})
         if not why:
@@ -92,7 +95,7 @@ def evaluate(pr, head_sha, items, now, cfg, tz="America/Chicago"):
     min_age = int(cfg.get("min_pr_age_minutes", 30))
     created = parse_time(pr["created_at"])
     eligible = created + timedelta(minutes=min_age)
-    result = {"pr": pr.get("number"), "head_sha": head_sha, "min_pr_age_minutes": min_age,
+    result = {"pr": pr.get("number"), "head_sha": head_sha, "pr_author": pr_author, "min_pr_age_minutes": min_age,
               "pr_created_at": pr["created_at"], "eligible_at": stamp(eligible), "considered": considered}
     if pr.get("state") != "open":
         return dict(result, ok=False, waiting=False, reason=f"PR is {pr.get('state')}, not open")
