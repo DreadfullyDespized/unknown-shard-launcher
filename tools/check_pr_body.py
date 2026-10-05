@@ -13,6 +13,7 @@ PLACEHOLDERS = {
 
 HEADING = re.compile(r"^##\s+(.*?)\s*#*\s*$")
 HTML_NOTE = re.compile(r"<!--.*?-->", re.S)
+ISSUE_LINK = re.compile(r"^\s*(close[sd]?|fix(e[sd])?|resolve[sd]?|refs?|part of)\b[\s:]*([\w.-]+/[\w.-]+)?#?\d*[\s,.]*$", re.I | re.M)
 
 
 def section_text(body, title):
@@ -38,6 +39,7 @@ def section_text(body, title):
 
 def is_real_text(text):
     cleaned = HTML_NOTE.sub(" ", text)
+    cleaned = ISSUE_LINK.sub(" ", cleaned)
     cleaned = re.sub(r"[*_`>#|\[\]()]", " ", cleaned)
     cleaned = re.sub(r"^\s*([-+]|\d+\.)\s+", " ", cleaned, flags=re.M)
     normalized = " ".join(cleaned.split()).strip().lower().rstrip(".:!")
@@ -76,6 +78,11 @@ SELF_TEST_CASES = (
     ("## For Dread\nx\n\n## Blast radius ##\n- Scripts/ only; next deploy restarts ServUO.\n\nCloses #1\n", True),
     ("## Blast radius\r\nTouches tools/ only.\r\n", True),
     ("## Blast radius\nCI only.\n", True),
+    ("## Blast radius\nTBD\n\nCloses #9\n\n## What\nx\n", False),
+    ("## Blast radius\n\n\nCloses #\n\n## What\n", False),
+    ("## Blast radius\n\nFixes DreadfullyDespized/unknown-shard#12\n", False),
+    ("## Blast radius\nCloses the gap in CI only.\n", True),
+    ("**Proof:** see `## Blast radius` below\n## Blast radius\nN/A\n", False),
 )
 
 
