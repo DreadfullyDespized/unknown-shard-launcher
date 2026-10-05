@@ -1,14 +1,5 @@
 namespace ShardLauncher.Core;
 
-/// <summary>
-/// Client-side rollback (plan §6.2).
-/// - A newly promoted release is on trial; it becomes last_good only after ClassicUO has run &gt; 60 s on it.
-/// - A crash (non-zero exit) inside 60 s, or a failed local verify, reverts to last_good (else previous).
-///   A crashed release is marked bad_serial and is never re-promoted; only a higher serial replaces it
-///   (server-side rollback = git revert → republish with a higher serial).
-/// - "Use previous version" does the same on demand.
-/// Gumps are re-applied from the target version through the ledger, so the ledger stays consistent.
-/// </summary>
 public sealed class RollbackManager(InstallLayout layout, LauncherLog log)
 {
     public static readonly TimeSpan ConfirmAfter = TimeSpan.FromSeconds(60);
@@ -17,7 +8,6 @@ public sealed class RollbackManager(InstallLayout layout, LauncherLog log)
     private LauncherState Load() => LauncherState.Load(layout.StatePath);
     private void Save(LauncherState s) => s.Save(layout.StatePath);
 
-    /// <summary>Call on every start before updating. Returns a user-facing message if it reverted.</summary>
     public string? RecoverOnStartup()
     {
         var s = Load();
@@ -29,7 +19,6 @@ public sealed class RollbackManager(InstallLayout layout, LauncherLog log)
         return null;
     }
 
-    /// <summary>"Use previous version" button.</summary>
     public string UsePrevious()
     {
         var s = Load();
@@ -75,7 +64,6 @@ public sealed class RollbackManager(InstallLayout layout, LauncherLog log)
         Save(s);
     }
 
-    /// <summary>ClassicUO has stayed up for <see cref="ConfirmAfter"/>: the active version is good.</summary>
     public void OnConfirmed()
     {
         var s = Load();
@@ -92,7 +80,7 @@ public sealed class RollbackManager(InstallLayout layout, LauncherLog log)
         if (runtime >= ConfirmAfter) { OnConfirmed(); return; }
         var s = Load();
         if (s.TrialSerial != s.CurrentSerial || s.TrialSerial == 0) return;
-        s.TrialStatus = exitCode != 0 ? "crashed" : "pending"; // a clean early quit is not a crash, but not a confirmation either
+        s.TrialStatus = exitCode != 0 ? "crashed" : "pending";
         Save(s);
         if (exitCode != 0) log.Warn($"ClassicUO exited with code {exitCode} after {runtime.TotalSeconds:0} s on trial version {s.CurrentSerial}");
     }

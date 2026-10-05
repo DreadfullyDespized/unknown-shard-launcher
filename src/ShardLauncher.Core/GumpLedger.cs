@@ -8,21 +8,11 @@ public enum GumpAction { Create, UpdateOwned, AlreadyPresent, ConflictForeign, C
 
 public sealed record UninstallReport(IReadOnlyList<string> Removed, IReadOnlyList<string> Kept);
 
-/// <summary>
-/// &lt;UO&gt;\Gumps\.shardlauncher-owned.json: files WE created + their sha256 (plan §3.3 item 4).
-/// Rules:
-/// - create a gump only if absent, or if ledger-owned and the bytes still match the ledger;
-/// - never overwrite or delete a foreign file or a user-edited owned file (conflict: log + skip);
-/// - only names matching ^\d{1,5}\.gump$ (0..65535), including names read back from the ledger file;
-/// - refuse reparse points / junctions / symlinks (Gumps dir or file);
-/// - write nothing else in the UO dir.
-/// </summary>
 public sealed class GumpLedger
 {
     public const string FileName = ".shardlauncher-owned.json";
 
     [JsonPropertyName("schema")] public int Schema { get; set; } = 1;
-    /// <summary>True if the Gumps folder did not exist and we created it (uninstall removes it again if empty).</summary>
     [JsonPropertyName("created_dir")] public bool CreatedDir { get; set; }
     [JsonPropertyName("files")] public SortedDictionary<string, string> Files { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
@@ -46,7 +36,6 @@ public sealed class GumpLedger
         }
         catch (JsonException)
         {
-            // Unreadable ledger: own nothing. Safe direction: we can no longer overwrite or delete anything.
             l = new();
             warn = "ledger unreadable; treating all gumps as foreign";
         }
@@ -83,10 +72,8 @@ public sealed class GumpLedger
         return actual == wantSha ? GumpAction.AlreadyPresent : GumpAction.ConflictForeign;
     }
 
-    /// <summary>Install a verified staged file. Create never overwrites; UpdateOwned re-checks ownership first.</summary>
     public void Install(string name, string stagedPath, string sha, GumpAction action, bool repairModified = false)
     {
-        // Repair (explicit user action) may restore an owned file the user edited; foreign files are never writable.
         if (repairModified && action == GumpAction.ConflictModified) action = GumpAction.UpdateOwned;
         if (action is not (GumpAction.Create or GumpAction.UpdateOwned)) throw new InvalidOperationException($"not writable: {action}");
         var path = PathFor(name);
@@ -102,7 +89,7 @@ public sealed class GumpLedger
             File.Copy(stagedPath, tmp, overwrite: false);
             if (Hashing.HashFile(tmp).Sha256 != sha) throw new IOException($"{name}: staged copy does not match {sha}");
             if (action == GumpAction.Create)
-                File.Move(tmp, path, overwrite: false); // throws if something appeared meanwhile
+                File.Move(tmp, path, overwrite: false);
             else
             {
                 var now = Decide(name, sha);
@@ -115,7 +102,6 @@ public sealed class GumpLedger
         finally { if (File.Exists(tmp)) File.Delete(tmp); }
     }
 
-    /// <summary>Delete an owned gump if its bytes still match the ledger. Returns false (file kept) otherwise.</summary>
     public bool TryRemoveOwned(string name)
     {
         if (!Files.TryGetValue(name, out var owned)) return false;
@@ -124,7 +110,7 @@ public sealed class GumpLedger
         if (!File.Exists(path)) { Files.Remove(name); return true; }
         if (IsReparse(path) || Hashing.HashFile(path).Sha256 != owned)
         {
-            Files.Remove(name); // user changed it: it is theirs now; never delete it
+            Files.Remove(name);
             return false;
         }
         File.Delete(path);
@@ -132,7 +118,6 @@ public sealed class GumpLedger
         return true;
     }
 
-    /// <summary>Remove owned gumps the current release no longer ships (hash-guarded).</summary>
     public IReadOnlyList<string> Retire(IEnumerable<string> keep)
     {
         var k = new HashSet<string>(keep, StringComparer.OrdinalIgnoreCase);
@@ -142,7 +127,6 @@ public sealed class GumpLedger
         return retired;
     }
 
-    /// <summary>Remove every owned gump whose hash still matches, then the ledger, then the Gumps dir if we created it and it is empty.</summary>
     public UninstallReport Uninstall()
     {
         var removed = new List<string>();

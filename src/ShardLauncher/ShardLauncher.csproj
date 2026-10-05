@@ -3,14 +3,12 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
-    <!-- Lets the project build on Linux CI/dev boxes; the app itself only runs on Windows. -->
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <!-- Exe name and product name can be set by the (gitignored) build config, see launcher.build.example.props. -->
     <AssemblyName Condition="'$(LauncherAssemblyName)' != ''">$(LauncherAssemblyName)</AssemblyName>
     <AssemblyName Condition="'$(LauncherAssemblyName)' == ''">ShardLauncher</AssemblyName>
     <RootNamespace>ShardLauncher</RootNamespace>

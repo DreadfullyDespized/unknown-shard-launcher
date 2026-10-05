@@ -5,7 +5,6 @@ using Xunit;
 
 namespace ShardLauncher.Tests;
 
-/// <summary>pinned ClassicUO mirror + Authenticode.</summary>
 public class CuoTests
 {
     private static PatchManifest WithCuo(Harness h, long serial, CuoEntry cuo)
@@ -22,7 +21,7 @@ public class CuoTests
         h.Publish(WithCuo(h, 1, h.CuoZip()));
         var r = await h.Run();
         Assert.True(r.Cuo.Ok, r.Cuo.Message);
-        Assert.Equal(3, r.ObjectsDownloaded); // gump + art + cuo zip
+        Assert.Equal(3, r.ObjectsDownloaded);
         Assert.True(File.Exists(h.Layout.CuoExe));
         Assert.Contains("BSD 2-Clause", File.ReadAllText(Path.Combine(h.Layout.CuoDir, CuoInstaller.NoticesName)));
         Assert.Equal(h.Layout.CuoExe, LaunchCommand.Build(h.Layout, h.UoPath, r.OverrideFile, TestConfig.Host, TestConfig.Port).FileName);
@@ -39,7 +38,6 @@ public class CuoTests
         using var h = new Harness();
         h.Publish(WithCuo(h, 1, h.CuoZip()));
         await h.Run();
-        // still "validly signed" per the fake, but bytes differ from the pinned zip: hash index catches it
         File.WriteAllText(h.Layout.CuoExe, "SIGNED:SignPath Foundation\npatched");
         var r = await h.Run();
         Assert.False(r.Cuo.Ok);
@@ -57,14 +55,14 @@ public class CuoTests
         var r = await h.Run();
         Assert.Contains(r.Conflicts, c => c.Contains("ClassicUO.exe refused"));
         Assert.Equal(exeBefore, File.ReadAllText(h.Layout.CuoExe));
-        Assert.True(r.Cuo.Ok); // old verified client still launchable
-        Assert.Equal(2, h.State.CurrentSerial); // art/gumps still updated
+        Assert.True(r.Cuo.Ok);
+        Assert.Equal(2, h.State.CurrentSerial);
         Assert.DoesNotContain(Directory.GetDirectories(h.Layout.Root), d => d.Contains(".tmp-") || d.Contains(".old-"));
     }
 
     [Theory]
-    [InlineData("SIGNED:Evil Corp\nexe", "SignPath Foundation")] // wrong signer
-    [InlineData("SIGNED:Evil Corp\nexe", "Evil Corp")]           // manifest names an unpinned signer
+    [InlineData("SIGNED:Evil Corp\nexe", "SignPath Foundation")]
+    [InlineData("SIGNED:Evil Corp\nexe", "Evil Corp")]
     public async Task Wrong_or_unpinned_signer_is_refused(string exe, string manifestSubject)
     {
         using var h = new Harness();

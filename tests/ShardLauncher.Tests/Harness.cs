@@ -6,7 +6,6 @@ using ShardLauncher.Patching;
 
 namespace ShardLauncher.Tests;
 
-/// <summary>Test Authenticode: a file is "signed by X" iff its bytes start with "SIGNED:X\n".</summary>
 public sealed class FakeVerifier : IAuthenticodeVerifier
 {
     public AuthenticodeResult Verify(string path)
@@ -17,7 +16,6 @@ public sealed class FakeVerifier : IAuthenticodeVerifier
     }
 }
 
-/// <summary>In-memory patch server. Counts object downloads.</summary>
 public sealed class FakeSource : IPatchSource
 {
     public Dictionary<string, byte[]> Files { get; } = new();
@@ -91,7 +89,6 @@ public sealed class Harness : IDisposable
         return m;
     }
 
-    /// <summary>Publish objects + signed manifest + pointer. Returns manifest bytes.</summary>
     public byte[] Publish(PatchManifest m, bool validate = true, Func<byte[], byte[]>? tamperManifest = null)
     {
         if (validate) ManifestValidator.Validate(m);
@@ -117,7 +114,6 @@ public sealed class Harness : IDisposable
 
     public IAuthenticodeVerifier Verifier { get; set; } = new FakeVerifier();
 
-    /// <summary>Build a fake ClassicUO release zip (flat, like the real one) and register it as an object.</summary>
     public CuoEntry CuoZip(string exeContent = "SIGNED:SignPath Foundation\nexe-v1", string subject = "SignPath Foundation",
         Action<System.IO.Compression.ZipArchive>? extra = null)
     {

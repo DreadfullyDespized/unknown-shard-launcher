@@ -5,7 +5,6 @@ using Xunit;
 
 namespace ShardLauncher.Tests;
 
-/// <summary>rollback, last-good, Repair, Use previous version.</summary>
 public class RollbackTests
 {
     private static readonly byte[] Anim2 = Encoding.ASCII.GetBytes("anim-v2-bytes");
@@ -25,7 +24,7 @@ public class RollbackTests
         h.Publish(h.Manifest(1));
         await h.Run();
         h.Rollback.OnLaunched(DateTimeOffset.UtcNow);
-        h.Rollback.OnExited(TimeSpan.FromSeconds(90), 0); // > 60 s → confirmed
+        h.Rollback.OnExited(TimeSpan.FromSeconds(90), 0);
         h.Publish(V2(h));
         await h.Run();
         return h;
@@ -43,7 +42,7 @@ public class RollbackTests
         Assert.Equal("pending", h.State.TrialStatus);
         h.Rollback.OnLaunched(DateTimeOffset.UtcNow);
         Assert.Equal("running", h.State.TrialStatus);
-        h.Rollback.OnExited(TimeSpan.FromSeconds(20), 0); // clean early quit: neither confirmed nor crashed
+        h.Rollback.OnExited(TimeSpan.FromSeconds(20), 0);
         Assert.Equal(0, h.State.LastGoodSerial);
         Assert.Equal("pending", h.State.TrialStatus);
         h.Rollback.OnConfirmed();
@@ -58,28 +57,27 @@ public class RollbackTests
         Assert.Equal(2, h.State.CurrentSerial);
         Assert.Equal(Gump2, UoGump(h));
         h.Rollback.OnLaunched(DateTimeOffset.UtcNow);
-        h.Rollback.OnExited(TimeSpan.FromSeconds(5), -1073741819); // access violation
+        h.Rollback.OnExited(TimeSpan.FromSeconds(5), -1073741819);
         Assert.Equal("crashed", h.State.TrialStatus);
 
-        // "next start"
         var msg = h.Rollback.RecoverOnStartup();
         Assert.Contains("Reverted from version 2 to 1", msg);
         Assert.Equal(1, h.State.CurrentSerial);
         Assert.Equal(2, h.State.BadSerial);
-        Assert.Equal(Harness.Gump3510, UoGump(h)); // gumps follow the active version
-        Assert.Equal(Harness.Sha(Harness.Gump3510), GumpLedger.Load(h.GumpsDir).Files["3510.gump"]); // ledger consistent
+        Assert.Equal(Harness.Gump3510, UoGump(h));
+        Assert.Equal(Harness.Sha(Harness.Gump3510), GumpLedger.Load(h.GumpsDir).Files["3510.gump"]);
 
-        var r = await h.Run(); // server still offers serial 2
+        var r = await h.Run();
         Assert.Equal(UpdateOutcome.KeptLastGood, r.Outcome);
         Assert.Contains("rolled back", r.Message);
         Assert.Equal(1, r.LaunchSerial);
         Assert.Contains(Path.Combine(h.Layout.VersionDir(1), "anim.mul"), File.ReadAllText(r.OverrideFile!));
 
-        h.Publish(h.Manifest(3)); // server-side rollback = git revert → higher serial with old content
+        h.Publish(h.Manifest(3));
         var r3 = await h.Run();
         Assert.Equal(3, h.State.CurrentSerial);
         Assert.Equal(0, h.State.BadSerial);
-        Assert.Equal(0, r3.ObjectsDownloaded); // old objects reused locally
+        Assert.Equal(0, r3.ObjectsDownloaded);
     }
 
     [Fact]
@@ -88,10 +86,10 @@ public class RollbackTests
         using var h = await V1ConfirmedThenV2(new Harness());
         Assert.True(Directory.Exists(h.Layout.VersionDir(1)));
         Assert.True(Directory.Exists(h.Layout.VersionDir(2)));
-        h.Rollback.OnConfirmed(); // 2 good
+        h.Rollback.OnConfirmed();
         h.Publish(h.Manifest(3));
         await h.Run();
-        h.Rollback.OnConfirmed(); // 3 good → keep {3, 2}
+        h.Rollback.OnConfirmed();
         Assert.Equal(new long[] { 2, 3 }, new VersionStore(h.Layout, new LauncherLog(h.Layout.Logs)).Serials().Order());
     }
 
@@ -103,8 +101,8 @@ public class RollbackTests
         var msg = h.Rollback.RecoverOnStartup();
         Assert.Contains("failed verification", msg);
         Assert.Equal(1, h.State.CurrentSerial);
-        Assert.Equal(0, h.State.BadSerial); // corruption is local, the release itself is not bad
-        var r = await h.Run(); // server still at 2 → rebuilt, only the corrupted file re-fetched
+        Assert.Equal(0, h.State.BadSerial);
+        var r = await h.Run();
         Assert.Equal(2, h.State.CurrentSerial);
         Assert.Equal(1, r.ObjectsDownloaded);
         Assert.True(new VersionStore(h.Layout, new LauncherLog(h.Layout.Logs)).Verify(2).Ok);
@@ -125,14 +123,14 @@ public class RollbackTests
         var before = h.Source.ObjectDownloads;
 
         var r = await h.Repair();
-        Assert.Equal(2, r.ObjectsDownloaded); // anim.mul + cuo zip; gump restored from the version folder copy
+        Assert.Equal(2, r.ObjectsDownloaded);
         Assert.Equal(before + 2, h.Source.ObjectDownloads);
         Assert.True(new VersionStore(h.Layout, new LauncherLog(h.Layout.Logs)).Verify(1).Ok);
         Assert.True(r.Cuo.Ok, r.Cuo.Message);
-        Assert.Equal(Harness.Gump3510, UoGump(h)); // owned file restored by explicit repair
-        Assert.Equal("other shard", File.ReadAllText(Path.Combine(h.GumpsDir, "1000.gump"))); // foreign untouched
+        Assert.Equal(Harness.Gump3510, UoGump(h));
+        Assert.Equal("other shard", File.ReadAllText(Path.Combine(h.GumpsDir, "1000.gump")));
 
-        var r2 = await h.Run(); // adjacent: back to a no-op
+        var r2 = await h.Run();
         Assert.Equal(0, r2.ObjectsDownloaded);
         Assert.Equal(UpdateOutcome.UpToDate, r2.Outcome);
     }
@@ -153,14 +151,14 @@ public class RollbackTests
     public async Task Use_previous_version_switches_and_keeps_ledger_consistent()
     {
         using var h = await V1ConfirmedThenV2(new Harness());
-        h.Rollback.OnConfirmed(); // even a confirmed release can be backed out by the player
+        h.Rollback.OnConfirmed();
         var msg = h.Rollback.UsePrevious();
         Assert.Contains("Reverted from version 2 to 1", msg);
         Assert.Equal(1, h.State.CurrentSerial);
         Assert.Equal(Harness.Gump3510, UoGump(h));
         var ledger = GumpLedger.Load(h.GumpsDir);
         Assert.Equal(Hashing.HashFile(Path.Combine(h.GumpsDir, "3510.gump")).Sha256, ledger.Files["3510.gump"]);
-        Assert.Equal(UpdateOutcome.KeptLastGood, (await h.Run()).Outcome); // 2 is not re-promoted
+        Assert.Equal(UpdateOutcome.KeptLastGood, (await h.Run()).Outcome);
         Assert.Equal(1, h.State.CurrentSerial);
     }
 

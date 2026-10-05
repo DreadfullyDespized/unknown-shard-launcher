@@ -1,6 +1,5 @@
 namespace ShardLauncher.Core;
 
-/// <summary>Player-side layout under %LOCALAPPDATA%\&lt;LauncherDataDirName&gt; (plan §3.1).</summary>
 public sealed class InstallLayout(string root)
 {
     public string Root { get; } = Path.GetFullPath(root);
@@ -14,7 +13,6 @@ public sealed class InstallLayout(string root)
     public string CuoDir => Path.Combine(Root, "cuo");
     public string CuoExe => Path.Combine(CuoDir, "ClassicUO.exe");
     public string CuoSettings => Path.Combine(Root, "cuo-settings.json");
-    /// <summary>Optional runtime override of the game server host/port only (see <see cref="LauncherConfig.WithServerOverride"/>).</summary>
     public string ServerOverride => Path.Combine(Root, LauncherConfig.ServerOverrideFileName);
 
     public static InstallLayout Default(string dataDirName) =>

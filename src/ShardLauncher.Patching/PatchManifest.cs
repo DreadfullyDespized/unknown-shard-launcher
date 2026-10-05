@@ -2,7 +2,6 @@ using System.Text.Json.Serialization;
 
 namespace ShardLauncher.Patching;
 
-/// <summary>Signed patch manifest, schema 1 (distribution-plan.md §3.2).</summary>
 public sealed class PatchManifest
 {
     [JsonPropertyName("schema"), JsonPropertyOrder(0)] public int Schema { get; set; } = 1;

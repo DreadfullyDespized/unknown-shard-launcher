@@ -21,7 +21,7 @@ public sealed class LauncherLog(string logDir)
                 Directory.CreateDirectory(logDir);
                 File.AppendAllText(Path.Combine(logDir, $"launcher-{now.ToString("yyyyMMdd", CultureInfo.InvariantCulture)}.log"), line + Environment.NewLine);
             }
-            catch (IOException) { /* logging must never break the launcher */ }
+            catch (IOException) {  }
             catch (UnauthorizedAccessException) { }
         }
         Line?.Invoke(line);

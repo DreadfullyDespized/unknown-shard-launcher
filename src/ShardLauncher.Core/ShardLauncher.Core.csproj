@@ -12,12 +12,6 @@
     <EmbeddedResource Include="..\..\notices\ClassicUO-THIRD-PARTY-NOTICES.txt" LogicalName="notices.cuo.txt" />
   </ItemGroup>
 
-  <!--
-    Build-time server config (see ../../Directory.Build.props and launcher.build.example.props).
-    Generates BuildSettings.g.cs from MSBuild properties and embeds each LauncherTrustedKey item.
-    Without a config the build still succeeds (values empty) and the launcher refuses to start
-    with a clear error. Pass -p:RequireLauncherConfig=true to fail the build instead.
-  -->
   <Target Name="LauncherBuildConfig" BeforeTargets="BeforeBuild">
     <PropertyGroup>
       <_LauncherSettingsFile>$(IntermediateOutputPath)BuildSettings.g.cs</_LauncherSettingsFile>

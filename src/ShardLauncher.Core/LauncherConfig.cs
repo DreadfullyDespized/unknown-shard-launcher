@@ -5,12 +5,6 @@ namespace ShardLauncher.Core;
 
 public sealed class LauncherConfigException(string message) : Exception(message);
 
-/// <summary>
-/// Server-specific settings. Everything here is injected at BUILD time from a gitignored
-/// <c>launcher.build.props</c> (see <c>launcher.build.example.props</c> and the README);
-/// nothing server-specific is committed. Only the game server host/port may be overridden
-/// at runtime (<see cref="WithServerOverride"/>); the patch URL and trusted keys never can.
-/// </summary>
 public sealed record LauncherConfig
 {
     public const string DefaultDisplayName = "Shard Launcher";
@@ -23,14 +17,11 @@ public sealed record LauncherConfig
     public int ServerPort { get; init; }
     public Uri? PatchBase { get; init; }
     public IReadOnlyDictionary<string, string> TrustedKeys { get; init; } = new Dictionary<string, string>();
-    /// <summary>Path of the runtime override that replaced host/port, if any.</summary>
     public string? ServerOverrideSource { get; init; }
 
-    /// <summary>The values compiled into this build (generated <c>BuildSettings</c> + embedded keys).</summary>
     public static LauncherConfig FromBuild() => Create(BuildSettings.DisplayName, BuildSettings.DataDirName, BuildSettings.ServerHost,
         BuildSettings.ServerPort, BuildSettings.PatchBaseUrl, Core.TrustedKeys.LoadEmbedded());
 
-    /// <summary>Lenient parse: bad values become empty and are reported by <see cref="Problems"/>.</summary>
     public static LauncherConfig Create(string? displayName, string? dataDirName, string? host, string? port, string? patchBaseUrl,
         IReadOnlyDictionary<string, string> trustedKeys) => new()
     {
@@ -42,7 +33,6 @@ public sealed record LauncherConfig
         TrustedKeys = trustedKeys,
     };
 
-    /// <summary>Everything that prevents this config from being used. Empty = usable.</summary>
     public IReadOnlyList<string> Problems
     {
         get
@@ -75,10 +65,6 @@ public sealed record LauncherConfig
                 "\nBuild it with a launcher.build.props (see README, \"Configuring a build\").");
     }
 
-    /// <summary>
-    /// Optional runtime override of the game server address ONLY: <c>{"host": "...", "port": 1234}</c>.
-    /// Missing file = unchanged. Any other property, or an invalid value, is a clear error (never silently ignored).
-    /// </summary>
     public LauncherConfig WithServerOverride(string path)
     {
         if (!File.Exists(path)) return this;

@@ -43,9 +43,9 @@ public class UpdaterTests
         h.Extra.Add(g2);
         h.Publish(h.Manifest(2, g2));
         var r = await h.Run();
-        Assert.Equal(1, r.ObjectsDownloaded); // only the changed gump
+        Assert.Equal(1, r.ObjectsDownloaded);
         Assert.Equal(2, h.State.CurrentSerial);
-        Assert.Equal(g2, File.ReadAllBytes(Path.Combine(h.GumpsDir, "3510.gump"))); // owned -> updated
+        Assert.Equal(g2, File.ReadAllBytes(Path.Combine(h.GumpsDir, "3510.gump")));
     }
 
     [Fact]
@@ -60,7 +60,7 @@ public class UpdaterTests
         m2.Files.RemoveAll(f => f.Id == "anim-849-mul");
         m2.Files.Add(Harness.Entry("anim-849-mul", "shard:art/anim.mul", anim2));
         h.Publish(m2);
-        h.Source.Files["objects/" + Harness.Sha(anim2)] = Encoding.ASCII.GetBytes("anim-v3"); // same size, wrong bytes
+        h.Source.Files["objects/" + Harness.Sha(anim2)] = Encoding.ASCII.GetBytes("anim-v3");
         var r = await h.Run();
         Assert.Equal(UpdateOutcome.KeptLastGood, r.Outcome);
         Assert.Contains("failed verification", r.Message);
@@ -82,7 +82,7 @@ public class UpdaterTests
         Assert.Equal(UpdateOutcome.KeptLastGood, r.Outcome);
         Assert.Contains("signature", r.Message);
         Assert.Equal(1, r.LaunchSerial);
-        Assert.Equal(1, h.State.HighestSerial); // unverified serial never recorded
+        Assert.Equal(1, h.State.HighestSerial);
     }
 
     [Fact]
@@ -117,7 +117,7 @@ public class UpdaterTests
         using var h = new Harness();
         h.Publish(h.Manifest(5));
         await h.Run();
-        h.Publish(h.Manifest(4)); // replay of an older, genuinely signed manifest
+        h.Publish(h.Manifest(4));
         var r = await h.Run();
         Assert.Equal(UpdateOutcome.KeptLastGood, r.Outcome);
         Assert.Contains("replay", r.Message);
@@ -166,8 +166,8 @@ public class UpdaterTests
         Assert.Equal("other shard gump", Read(Path.Combine(h.GumpsDir, "1000.gump")));
         Assert.Contains(r.Conflicts, c => c.Contains("3510.gump") && c.Contains("ConflictForeign"));
         Assert.False(File.Exists(Path.Combine(h.GumpsDir, GumpLedger.FileName)) && GumpLedger.Load(h.GumpsDir).Files.ContainsKey("3510.gump"));
-        foreach (var (p, sha) in stockBefore) Assert.Equal(sha, Hashing.HashFile(p).Sha256); // stock hashes unchanged
-        Assert.Equal(1, h.State.CurrentSerial); // art still promoted
+        foreach (var (p, sha) in stockBefore) Assert.Equal(sha, Hashing.HashFile(p).Sha256);
+        Assert.Equal(1, h.State.CurrentSerial);
     }
 
     [Fact]
@@ -251,7 +251,7 @@ public class UpdaterTests
     [Fact]
     public async Task Promote_failure_leaves_previous_set_intact()
     {
-        if (OperatingSystem.IsWindows()) return; // uses POSIX permissions to simulate disk-full / locked dir
+        if (OperatingSystem.IsWindows()) return;
         using var h = new Harness();
         h.Publish(h.Manifest(1));
         await h.Run();
@@ -347,7 +347,6 @@ public class SourceAndLaunchTests
 
 public class SigningRoundTripTests
 {
-    /// <summary>Replaces the old production-key test vector: a throwaway key is generated per run.</summary>
     [Fact]
     public void Throwaway_key_signs_and_verifies_a_manifest_and_tamper_is_rejected()
     {

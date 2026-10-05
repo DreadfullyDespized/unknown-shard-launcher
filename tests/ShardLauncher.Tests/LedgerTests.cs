@@ -5,7 +5,6 @@ using Xunit;
 
 namespace ShardLauncher.Tests;
 
-/// <summary>ledger-guarded add-only Gumps writes.</summary>
 public class LedgerTests
 {
     private static SortedDictionary<string, string> Snapshot(string dir) => new(
@@ -93,7 +92,6 @@ public class LedgerTests
         h.Publish(h.Manifest(1));
         var r = await h.Run();
         Assert.Contains(r.Conflicts, c => c.Contains("ConflictForeign"));
-        // even a forged ledger entry must not make us delete through the link
         var l = GumpLedger.Load(h.GumpsDir);
         l.Files["3510.gump"] = Harness.Sha(Encoding.ASCII.GetBytes("victim"));
         Assert.False(l.TryRemoveOwned("3510.gump"));

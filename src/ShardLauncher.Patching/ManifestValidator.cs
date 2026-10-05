@@ -23,7 +23,7 @@ public static class ManifestValidator
         if (m.Files is null) Fail("files missing");
 
         var ids = new HashSet<string>(StringComparer.Ordinal);
-        var dests = new HashSet<string>(StringComparer.OrdinalIgnoreCase); // NTFS is case-insensitive
+        var dests = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         long total = 0;
         foreach (var f in m.Files!)
         {
@@ -70,13 +70,11 @@ public static class ManifestValidator
 
 public static class SerialGuard
 {
-    /// <summary>Publisher side: every new manifest must strictly increase the serial.</summary>
     public static void EnsureNewer(long previous, long next)
     {
         if (next <= previous) throw new ManifestValidationException($"serial {next} is not greater than previous {previous}");
     }
 
-    /// <summary>Client side: refuse anything below the highest serial seen (replay/downgrade). Equal = same release.</summary>
     public static void EnsureNotReplay(long highestSeen, long next)
     {
         if (next < highestSeen) throw new ManifestValidationException($"serial {next} is below highest seen {highestSeen} (replay/downgrade)");

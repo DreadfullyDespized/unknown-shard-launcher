@@ -5,11 +5,6 @@ using ShardLauncher.Patching;
 
 namespace ShardLauncher.Core;
 
-/// <summary>
-/// art\versions\&lt;serial&gt;\: one self-contained, hash-indexed set per release (plan §3.1/§6.2):
-/// shard art at the root, the release's gumps under gumps\, uofiles-override.txt, and .files.json (rel path → sha256).
-/// The active set's gumps are applied to &lt;UO&gt;\Gumps via the ledger, so rollback keeps the ledger consistent.
-/// </summary>
 public sealed class VersionStore(InstallLayout layout, LauncherLog log)
 {
     public const string IndexName = ".files.json";
@@ -29,7 +24,6 @@ public sealed class VersionStore(InstallLayout layout, LauncherLog log)
         return idx is not null && idx.Count == expected.Count && expected.All(kv => idx.TryGetValue(kv.Key, out var v) && v == kv.Value);
     }
 
-    /// <summary>Full re-verify of a version folder against its index.</summary>
     public CuoCheck Verify(long serial)
     {
         var idx = ReadIndex(serial);
@@ -52,7 +46,6 @@ public sealed class VersionStore(InstallLayout layout, LauncherLog log)
                 .Select(n => long.Parse(n!, CultureInfo.InvariantCulture))
             : Enumerable.Empty<long>();
 
-    /// <summary>Find a hash-verified local copy of an object in any retained version (plus extra candidates) to avoid a download.</summary>
     public string? FindLocal(string sha, long size, IEnumerable<string>? extra = null)
     {
         var candidates = Serials().SelectMany(s => (ReadIndex(s) ?? new()).Where(kv => kv.Value == sha).Select(kv => PathOf(s, kv.Key)));
@@ -61,7 +54,6 @@ public sealed class VersionStore(InstallLayout layout, LauncherLog log)
         return null;
     }
 
-    /// <summary>Delete versions not in the keep set (current, previous, last_good).</summary>
     public void Prune(params long[] keep)
     {
         foreach (var s in Serials().Where(s => !keep.Contains(s)))
@@ -83,10 +75,6 @@ public sealed class VersionStore(InstallLayout layout, LauncherLog log)
         return sb.ToString();
     }
 
-    /// <summary>
-    /// Make &lt;UO&gt;\Gumps match version <paramref name="serial"/> under the ledger rules (create/update owned only,
-    /// retire owned files the version does not ship, conflicts logged). Returns true if anything changed.
-    /// </summary>
     public bool ApplyGumps(long serial, string uoPath, bool repair, List<string> conflicts)
     {
         var idx = ReadIndex(serial);

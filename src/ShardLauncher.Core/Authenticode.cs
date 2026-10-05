@@ -13,13 +13,11 @@ public interface IAuthenticodeVerifier
 
 public static class Authenticode
 {
-    /// <summary>Signer CNs we accept for ClassicUO.exe, compiled in. The signed manifest must also name the same subject.</summary>
     public static readonly IReadOnlySet<string> PinnedSubjects = new HashSet<string>(StringComparer.Ordinal) { "SignPath Foundation" };
 
     public static IAuthenticodeVerifier ForPlatform() =>
         OperatingSystem.IsWindows() ? new WindowsAuthenticodeVerifier() : new UnsupportedPlatformVerifier();
 
-    /// <summary>Valid signature AND signer CN equals the manifest subject AND that subject is pinned.</summary>
     public static (bool Ok, string Why) Check(IAuthenticodeVerifier v, string path, string expectedSubject)
     {
         if (!PinnedSubjects.Contains(expectedSubject)) return (false, $"subject '{expectedSubject}' is not pinned in this launcher");
@@ -30,7 +28,6 @@ public static class Authenticode
     }
 }
 
-/// <summary>Fails closed: no Authenticode on this OS means ClassicUO is never considered verified.</summary>
 public sealed class UnsupportedPlatformVerifier : IAuthenticodeVerifier
 {
     public AuthenticodeResult Verify(string path) => new(false, null, "Authenticode verification requires Windows");
@@ -57,7 +54,6 @@ public sealed class WindowsAuthenticodeVerifier : IAuthenticodeVerifier
             {
                 cbStruct = (uint)Marshal.SizeOf<WintrustData>(),
                 dwUIChoice = WtdUiNone,
-                // Revocation is not checked online so offline players can still play; the hash pin in the signed manifest is the primary control.
                 fdwRevocationChecks = WtdRevokeNone,
                 dwUnionChoice = WtdChoiceFile,
                 pFile = pFile,

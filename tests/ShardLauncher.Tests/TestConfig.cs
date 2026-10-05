@@ -4,7 +4,6 @@ using Xunit;
 
 namespace ShardLauncher.Tests;
 
-/// <summary>Placeholder server values for tests only (RFC 6761 .invalid names; never resolvable).</summary>
 public static class TestConfig
 {
     public const string Host = "game.example.invalid";
@@ -39,7 +38,6 @@ public class LauncherConfigTests
     [Fact]
     public void Example_file_placeholders_are_rejected()
     {
-        // launcher.build.example.props ships port 0000 and a <PUBLIC_KEY_PEM> placeholder.
         var c = LauncherConfig.Create("Example Shard", "ExampleShard", "game.example.invalid", "0000", "https://updates.example.invalid/files/",
             new Dictionary<string, string> { ["example-key-1"] = "<PUBLIC_KEY_PEM>" });
         Assert.Contains(c.Problems, p => p.Contains("port"));
@@ -86,7 +84,7 @@ public class LauncherConfigTests
     public void Build_config_never_embeds_a_private_key()
     {
         foreach (var pem in TrustedKeys.LoadEmbedded().Values) Assert.DoesNotContain("PRIVATE", pem);
-        _ = LauncherConfig.FromBuild(); // must not throw, configured or not
+        _ = LauncherConfig.FromBuild();
     }
 
     private static string TempFile(string content)

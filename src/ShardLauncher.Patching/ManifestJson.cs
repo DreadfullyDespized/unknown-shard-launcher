@@ -3,11 +3,6 @@ using System.Text.Json.Serialization;
 
 namespace ShardLauncher.Patching;
 
-/// <summary>
-/// Deterministic (canonical) manifest bytes. Compact JSON (no platform newlines),
-/// fixed property order, files sorted by id, maps sorted ordinally. The signature
-/// is over these exact bytes; verifiers never re-serialize before verifying.
-/// </summary>
 public static class ManifestJson
 {
     private static readonly JsonSerializerOptions WriteOptions = new()

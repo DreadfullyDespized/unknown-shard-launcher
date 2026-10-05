@@ -2,10 +2,8 @@ using System.Diagnostics;
 
 namespace ShardLauncher.Core;
 
-/// <summary>Builds the §3.4 ClassicUO command line. Passwords never go on the command line.</summary>
 public static class LaunchCommand
 {
-    /// <summary>Host/port come from <see cref="LauncherConfig"/>; there is deliberately no default server.</summary>
     public static ProcessStartInfo Build(InstallLayout l, string uoPath, string? overrideFile, string host, int port)
     {
         if (string.IsNullOrWhiteSpace(host) || Uri.CheckHostName(host) == UriHostNameType.Unknown)

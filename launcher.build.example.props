@@ -1,28 +1,12 @@
 <Project>
-  <!--
-    EXAMPLE ONLY. Copy to launcher.build.props (gitignored) or keep it outside this repo and
-    build with -p:LauncherBuildConfig=/abs/path/to/launcher.build.props. Never commit real values.
-    Every value below is a placeholder; a launcher built with placeholders refuses to run.
-  -->
   <PropertyGroup>
-    <!-- Window title / product name. -->
     <LauncherDisplayName>Example Shard</LauncherDisplayName>
-    <!-- Folder under %LOCALAPPDATA% for art, logs, ClassicUO and state. No path separators. -->
     <LauncherDataDirName>ExampleShard</LauncherDataDirName>
-    <!-- Default game server address passed to ClassicUO (-ip / -port). -->
     <LauncherServerHost>game.example.invalid</LauncherServerHost>
     <LauncherServerPort>0000</LauncherServerPort>
-    <!-- HTTPS base of the patch server; must end with '/'. -->
     <LauncherPatchBaseUrl>https://updates.example.invalid/files/</LauncherPatchBaseUrl>
-    <!-- Optional: name of the produced exe (default ShardLauncher). -->
-    <!-- <LauncherAssemblyName>ExampleShardLauncher</LauncherAssemblyName> -->
   </PropertyGroup>
   <ItemGroup>
-    <!--
-      Trusted manifest-signing PUBLIC key(s), ECDSA P-256 SubjectPublicKeyInfo PEM (<PUBLIC_KEY_PEM>).
-      KeyId must equal the manifest's signing_key_id. Add a second item to rotate keys.
-      Use $(MSBuildThisFileDirectory) so the path is relative to this file.
-    -->
     <LauncherTrustedKey Include="$(MSBuildThisFileDirectory)keys/example-signing-public.pem" KeyId="example-key-1" />
   </ItemGroup>
 </Project>

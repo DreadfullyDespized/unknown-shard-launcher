@@ -17,11 +17,9 @@ public sealed record UpdateResult(
     IReadOnlyList<string> Conflicts,
     bool LauncherUpdateRequired)
 {
-    /// <summary>Result of the full ClassicUO verify (hash index + Authenticode). Play requires Ok.</summary>
     public CuoCheck Cuo { get; init; } = new(false, "not checked");
 }
 
-/// <summary>fetch → verify signature → validate → diff → stage → verify → promote (plan §3).</summary>
 public sealed class Updater(InstallLayout layout, IPatchSource source, IReadOnlyDictionary<string, string> trustedKeys,
     Version launcherVersion, LauncherLog log, IAuthenticodeVerifier? verifier = null)
 {
@@ -33,8 +31,6 @@ public sealed class Updater(InstallLayout layout, IPatchSource source, IReadOnly
 
     private readonly VersionStore _store = new(layout, log);
 
-    /// <param name="repair">Repair button: rebuild the active set from hash-verified local copies + re-downloads,
-    /// restore user-edited owned gumps, reinstall ClassicUO if it fails verification.</param>
     public async Task<UpdateResult> RunAsync(IProgress<UpdateProgress>? progress = null, CancellationToken ct = default, bool repair = false)
     {
         var r = await RunCoreAsync(progress, ct, repair).ConfigureAwait(false);
@@ -51,7 +47,6 @@ public sealed class Updater(InstallLayout layout, IPatchSource source, IReadOnly
         var conflicts = new List<string>();
         int downloads = 0;
 
-        // 1. fetch + verify
         progress?.Report(new("Checking for updates", 0, 0));
         PatchManifest m;
         try
@@ -80,7 +75,6 @@ public sealed class Updater(InstallLayout layout, IPatchSource source, IReadOnly
             return LastGood(state, $"Release {m.Version} was rolled back on this PC; waiting for a newer release.", conflicts, downloads, false);
         if (state.BadSerial != 0 && m.Serial > state.BadSerial) state.BadSerial = 0;
 
-        // 2. diff: the expected version index (art at root, gumps under gumps/)
         var skipNames = StockMismatches(m, uoPath);
         var gumpsDir = Path.Combine(uoPath, "Gumps");
         var expected = new SortedDictionary<string, string>(StringComparer.Ordinal);
@@ -91,7 +85,6 @@ public sealed class Updater(InstallLayout layout, IPatchSource source, IReadOnly
             if (skipNames.Contains(t.FileName)) continue;
             var rel = t.Root == DestRoot.ShardArt ? t.FileName : VersionStore.GumpsSub + "/" + t.FileName;
             expected[rel] = f.Sha256;
-            // An identical gump already in <UO>\Gumps (ours or not) can seed the version folder without a download.
             entries.Add((rel, f, t.Root == DestRoot.UoGumps ? Path.Combine(gumpsDir, t.FileName) : null));
         }
 
@@ -110,7 +103,6 @@ public sealed class Updater(InstallLayout layout, IPatchSource source, IReadOnly
         if (installCuo)
             need.TryAdd(cuoWant!.Sha256, new ManifestFile { Id = "classicuo", File = cuoWant.File, Sha256 = cuoWant.Sha256, Size = cuoWant.Size });
 
-        // 3. stage + verify every object before touching anything live
         long total = need.Values.Sum(f => f.Size), done = 0;
         try
         {
@@ -134,7 +126,6 @@ public sealed class Updater(InstallLayout layout, IPatchSource source, IReadOnly
             return LastGood(state, "Update rejected: " + e.Message, conflicts, downloads, false);
         }
 
-        // 4. promote: build the complete new set in a temp folder, swap it in, then flip the pointer
         if (promote)
         {
             var final = layout.VersionDir(m.Serial);
@@ -149,7 +140,7 @@ public sealed class Updater(InstallLayout layout, IPatchSource source, IReadOnly
                 File.WriteAllBytes(Path.Combine(tmp, VersionStore.IndexName), JsonSerializer.SerializeToUtf8Bytes(expected));
                 File.WriteAllText(Path.Combine(tmp, "uofiles-override.txt"),
                     VersionStore.BuildOverride(m, expected.Keys.Where(k => !k.Contains('/')), final), new UTF8Encoding(false));
-                if (Directory.Exists(final)) Directory.Move(final, old); // same serial (repair / stale partial)
+                if (Directory.Exists(final)) Directory.Move(final, old);
                 try { Directory.Move(tmp, final); }
                 catch { if (Directory.Exists(old) && !Directory.Exists(final)) Directory.Move(old, final); throw; }
                 TryDelete(old);
@@ -161,7 +152,7 @@ public sealed class Updater(InstallLayout layout, IPatchSource source, IReadOnly
                     state.TrialStartedUtc = null;
                 }
                 state.CurrentSerial = m.Serial;
-                state.Save(layout.StatePath); // atomic switch to the new set
+                state.Save(layout.StatePath);
                 _store.Prune(state.CurrentSerial, state.PreviousSerial, state.LastGoodSerial);
                 log.Info($"promoted version {m.Serial}{(repair ? " (repair)" : "")}");
             }
@@ -174,7 +165,6 @@ public sealed class Updater(InstallLayout layout, IPatchSource source, IReadOnly
         }
         else state.Save(layout.StatePath);
 
-        // 4b. pinned ClassicUO: a refused client never blocks art/gumps; the old client is kept.
         bool cuoChanged = false;
         if (installCuo)
         {
@@ -184,7 +174,6 @@ public sealed class Updater(InstallLayout layout, IPatchSource source, IReadOnly
             if (!c.Ok) conflicts.Add(c.Message);
         }
 
-        // 5. Gumps: make <UO>\Gumps match the active version under the ledger rules
         bool gumpsChanged = _store.ApplyGumps(state.CurrentSerial, uoPath, repair, conflicts);
         ResetStaging();
 
@@ -200,7 +189,7 @@ public sealed class Updater(InstallLayout layout, IPatchSource source, IReadOnly
     private static bool IsUpdateFailure(Exception e, CancellationToken ct) =>
         e is ManifestValidationException or PatchSourceException or HttpRequestException or IOException
             or UnauthorizedAccessException or System.Security.Cryptography.CryptographicException
-        || (e is TaskCanceledException && !ct.IsCancellationRequested); // HttpClient timeout
+        || (e is TaskCanceledException && !ct.IsCancellationRequested);
 
     private UpdateResult LastGood(LauncherState s, string msg, List<string> conflicts, int downloads, bool needLauncher)
     {
@@ -217,7 +206,7 @@ public sealed class Updater(InstallLayout layout, IPatchSource source, IReadOnly
         foreach (var r in m.RequiresStock ?? new())
         {
             var p = DestRules.Resolve(uoPath, r.Name);
-            var ok = File.Exists(p) && Hashing.HashFile(p).Sha256 == r.Sha256; // read-only
+            var ok = File.Exists(p) && Hashing.HashFile(p).Sha256 == r.Sha256;
             if (ok) continue;
             log.Warn($"stock {r.Name} does not match; skipping {string.Join(", ", r.AppliesTo)}");
             foreach (var a in r.AppliesTo) skip.Add(a);

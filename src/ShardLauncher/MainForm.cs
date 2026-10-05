@@ -3,7 +3,6 @@ using ShardLauncher.Core;
 
 namespace ShardLauncher;
 
-/// <summary>Small window: status line, progress bar, Play button (Dread decision 2026-09-29).</summary>
 internal sealed class MainForm : Form
 {
     private readonly LauncherConfig _config;
@@ -22,7 +21,6 @@ internal sealed class MainForm : Form
 
     public MainForm()
     {
-        // Server host/port, patch URL and trusted keys are compiled in from the build config (README "Configuring a build").
         _config = LauncherConfig.FromBuild();
         _layout = InstallLayout.Default(_config.DataDirName);
         try
@@ -51,7 +49,6 @@ internal sealed class MainForm : Form
         _previous.Click += (_, _) => UsePrevious();
         if (_configError is not null)
         {
-            // Fail loudly: no server, patch URL or trusted key was supplied at build time (or server.json is invalid).
             _log.Warn("configuration error: " + _configError);
             _status.Text = "Launcher is not configured. See the error message.";
             _repair.Enabled = _previous.Enabled = _uninstall.Enabled = false;
@@ -78,7 +75,6 @@ internal sealed class MainForm : Form
             state.Save(_layout.StatePath);
         }
 
-        // revert first if the last trial crashed early or local files fail verification.
         var reverted = _rollback.RecoverOnStartup();
 
         var progress = new Progress<UpdateProgress>(p =>
@@ -91,7 +87,6 @@ internal sealed class MainForm : Form
         try
         {
             _result = await Task.Run(() => updater.RunAsync(progress, default, repair));
-            // Repair when offline / still broken: fall back to a verified earlier version.
             reverted ??= repair ? _rollback.RecoverOnStartup() : null;
         }
         catch (Exception e)
@@ -108,7 +103,6 @@ internal sealed class MainForm : Form
         if (_result.LauncherUpdateRequired) msg += " A newer launcher is required.";
         _status.Text = msg;
 
-        // Play only with a hash-verified, Authenticode-verified pinned ClassicUO.
         _repair.Enabled = _previous.Enabled = true;
         if (_result.Cuo.Ok) _play.Enabled = true;
         else _status.Text += Environment.NewLine + _result.Cuo.Message;
@@ -135,7 +129,6 @@ internal sealed class MainForm : Form
             var started = DateTimeOffset.UtcNow;
             _rollback.OnLaunched(started);
             Hide();
-            // Watch the first 60 s: survive → last_good; non-zero exit → trial marked crashed → revert.
             var exitTask = proc.WaitForExitAsync();
             var exited = await Task.WhenAny(exitTask, Task.Delay(RollbackManager.ConfirmAfter)) == exitTask;
             if (!exited) { _rollback.OnConfirmed(); Close(); return; }
@@ -151,7 +144,6 @@ internal sealed class MainForm : Form
         }
     }
 
-    /// <summary>remove only gumps we created whose bytes are unchanged; leave everything else.</summary>
     private void UninstallGumps()
     {
         var state = LauncherState.Load(_layout.StatePath);

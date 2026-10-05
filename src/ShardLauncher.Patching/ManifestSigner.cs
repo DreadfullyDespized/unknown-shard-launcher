@@ -2,11 +2,6 @@ using System.Security.Cryptography;
 
 namespace ShardLauncher.Patching;
 
-/// <summary>
-/// ECDSA P-256 / SHA-256 over the exact manifest bytes. Signatures are DER
-/// (RFC 3279) so they also verify with `openssl dgst -sha256 -verify pub.pem`.
-/// The .sig file on the server is base64 of that DER blob.
-/// </summary>
 public static class ManifestSigner
 {
     public const DSASignatureFormat Format = DSASignatureFormat.Rfc3279DerSequence;
@@ -38,7 +33,6 @@ public static class ManifestSigner
         catch (FormatException) { throw new ManifestValidationException("signature is not base64"); }
     }
 
-    /// <summary>SHA-256 (lowercase hex) of the DER SubjectPublicKeyInfo.</summary>
     public static string Fingerprint(string publicKeyPem)
     {
         using var ec = ECDsa.Create();
@@ -47,10 +41,6 @@ public static class ManifestSigner
         return Hashing.Sha256Hex(ec.ExportSubjectPublicKeyInfo());
     }
 
-    /// <summary>
-    /// Verify against the trusted key set (current + optional next key) BEFORE parsing,
-    /// then require the manifest's signing_key_id to name the key that verified.
-    /// </summary>
     public static PatchManifest VerifyAndParse(ReadOnlySpan<byte> manifestBytes, ReadOnlySpan<byte> signature,
         IReadOnlyDictionary<string, string> trustedKeysById)
     {

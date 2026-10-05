@@ -7,7 +7,6 @@ public enum DestRoot { UoGumps, ShardArt }
 
 public readonly record struct DestTarget(DestRoot Root, string FileName);
 
-/// <summary>Path allowlist (distribution-plan.md §3.3 item 3). Shared by ManifestTool and the launcher.</summary>
 public static class DestRules
 {
     public const string UoGumpsPrefix = "uo:Gumps/";
@@ -50,7 +49,6 @@ public static class DestRules
 
     private static void CheckName(string dest, string name)
     {
-        // Covers '..', '/', '\', rooted paths, drive letters and NTFS ADS (':').
         if (name is "." or ".." || name.Contains("..", StringComparison.Ordinal)) throw Bad(dest, "path traversal");
         if (!NameRx.IsMatch(name)) throw Bad(dest, "name must match ^[A-Za-z0-9._-]+$ (no separators, no ':')");
         if (name.EndsWith('.')) throw Bad(dest, "trailing dot");
@@ -58,7 +56,6 @@ public static class DestRules
         if (Reserved.Contains(stem)) throw Bad(dest, "reserved device name");
     }
 
-    /// <summary>Resolve to an absolute path and prove it stays directly under <paramref name="rootDir"/>.</summary>
     public static string Resolve(string rootDir, string fileName)
     {
         if (!IsSafeFileName(fileName)) throw Bad(fileName, "unsafe file name");

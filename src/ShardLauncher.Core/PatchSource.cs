@@ -10,7 +10,6 @@ public sealed class PatchSourceException(string message) : Exception(message);
 public interface IPatchSource
 {
     Task<byte[]> GetBytesAsync(string relPath, int maxBytes, CancellationToken ct);
-    /// <summary>Stream to <paramref name="destPath"/>; must fail if the body is not exactly <paramref name="expectedSize"/> bytes.</summary>
     Task DownloadToFileAsync(string relPath, string destPath, long expectedSize, Action<long>? onBytes, CancellationToken ct);
 }
 
@@ -21,7 +20,6 @@ public static class PatchPaths
         Allowed.IsMatch(relPath) ? relPath : throw new PatchSourceException($"refusing server path '{relPath}'");
 }
 
-/// <summary>current.json: unsigned pointer to the live signed manifest.</summary>
 public sealed class PatchPointer
 {
     [JsonPropertyName("serial")] public long Serial { get; set; }
@@ -40,7 +38,6 @@ public sealed class PatchPointer
     }
 }
 
-/// <summary>HTTPS-only source; the base URL comes from <see cref="LauncherConfig.PatchBase"/>. Default certificate validation is always on (no callback is ever installed).</summary>
 public sealed class HttpsPatchSource : IPatchSource
 {
     private readonly Uri _base;

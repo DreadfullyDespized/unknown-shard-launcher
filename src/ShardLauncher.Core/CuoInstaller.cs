@@ -6,7 +6,6 @@ using ShardLauncher.Patching;
 
 namespace ShardLauncher.Core;
 
-/// <summary>cuo\.cuo-install.json: which mirrored zip is extracted + hash of every extracted file.</summary>
 public sealed class CuoIndex
 {
     [JsonPropertyName("zip_sha256")] public string ZipSha256 { get; set; } = "";
@@ -17,11 +16,6 @@ public sealed class CuoIndex
 
 public sealed record CuoCheck(bool Ok, string Message);
 
-/// <summary>
-/// Pinned ClassicUO. The zip is an unmodified official release mirrored at objects/&lt;sha&gt;
-/// and pinned by sha256+size in the signed manifest. Install = safe extract to a temp dir, Authenticode-check
-/// ClassicUO.exe against the pinned signer, write notices + index, then swap into cuo\. Any failure keeps the old install.
-/// </summary>
 public sealed class CuoInstaller(InstallLayout layout, IAuthenticodeVerifier verifier, LauncherLog log)
 {
     public const string ExeName = "ClassicUO.exe";
@@ -39,10 +33,8 @@ public sealed class CuoInstaller(InstallLayout layout, IAuthenticodeVerifier ver
         catch (JsonException) { return null; }
     }
 
-    /// <summary>Cheap check used by the updater: is this exact zip already installed?</summary>
     public bool IsCurrent(CuoEntry want) => ReadIndex()?.ZipSha256 == want.Sha256;
 
-    /// <summary>Full check before every launch and on Repair: every extracted file matches its hash, and ClassicUO.exe is signed by the pinned subject.</summary>
     public CuoCheck VerifyInstalled()
     {
         var idx = ReadIndex();
@@ -58,7 +50,6 @@ public sealed class CuoInstaller(InstallLayout layout, IAuthenticodeVerifier ver
         return ok ? new(true, $"ClassicUO {idx.Version} verified") : new(false, "ClassicUO.exe refused: " + why);
     }
 
-    /// <summary>Install a zip whose sha256/size the caller has already verified against the signed manifest.</summary>
     public CuoCheck Install(string verifiedZip, CuoEntry want)
     {
         var tmp = layout.CuoDir + ".tmp-" + Guid.NewGuid().ToString("N");
@@ -77,7 +68,7 @@ public sealed class CuoInstaller(InstallLayout layout, IAuthenticodeVerifier ver
             using (var f = File.Create(Path.Combine(tmp, NoticesName))) n.CopyTo(f);
             File.WriteAllBytes(Path.Combine(tmp, IndexName), JsonSerializer.SerializeToUtf8Bytes(index, new JsonSerializerOptions { WriteIndented = true }));
 
-            if (Directory.Exists(layout.CuoDir)) Directory.Move(layout.CuoDir, old); // fails if CUO is running: old install kept
+            if (Directory.Exists(layout.CuoDir)) Directory.Move(layout.CuoDir, old);
             try { Directory.Move(tmp, layout.CuoDir); }
             catch { if (Directory.Exists(old) && !Directory.Exists(layout.CuoDir)) Directory.Move(old, layout.CuoDir); throw; }
             TryDelete(old);
@@ -117,7 +108,7 @@ public sealed class CuoInstaller(InstallLayout layout, IAuthenticodeVerifier ver
                 int n;
                 while ((n = src.Read(buf, 0, buf.Length)) > 0)
                 {
-                    total += n; // counted while inflating; header sizes are not trusted
+                    total += n;
                     if (total > MaxUncompressedBytes) throw new InvalidDataException($"zip expands beyond {MaxUncompressedBytes} bytes");
                     dst.Write(buf, 0, n);
                     hash.AppendData(buf, 0, n);
@@ -127,7 +118,6 @@ public sealed class CuoInstaller(InstallLayout layout, IAuthenticodeVerifier ver
         }
     }
 
-    /// <summary>Zip-slip guard: relative, '/'-separated, safe segments only, and must resolve under root.</summary>
     public static string SafeJoin(string root, string rel)
     {
         var segs = rel.Split('/');
