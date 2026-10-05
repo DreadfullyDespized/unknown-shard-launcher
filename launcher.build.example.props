@@ -1,0 +1,12 @@
+<Project>
+  <PropertyGroup>
+    <LauncherDisplayName>Example Shard</LauncherDisplayName>
+    <LauncherDataDirName>ExampleShard</LauncherDataDirName>
+    <LauncherServerHost>game.example.invalid</LauncherServerHost>
+    <LauncherServerPort>0000</LauncherServerPort>
+    <LauncherPatchBaseUrl>https://updates.example.invalid/files/</LauncherPatchBaseUrl>
+  </PropertyGroup>
+  <ItemGroup>
+    <LauncherTrustedKey Include="$(MSBuildThisFileDirectory)keys/example-signing-public.pem" KeyId="example-key-1" />
+  </ItemGroup>
+</Project>
