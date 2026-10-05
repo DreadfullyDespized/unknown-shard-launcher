@@ -2,7 +2,9 @@
   "watched_workflows": [
     "correction-loop tests"
   ],
-  "required_checks": [],
+  "required_checks": [
+    "correction-loop tests"
+  ],
   "watch_deployments": true,
   "deploy_environments": [],
   "pending_workflows": [],
