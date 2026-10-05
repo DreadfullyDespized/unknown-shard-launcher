@@ -1,0 +1,69 @@
+name: Bug
+description: Something is broken. Show the evidence, weigh at least two fixes, and trace where it came from.
+title: "Bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Every claim needs a link (CI run, log, screenshot, SHA-pinned file link). A claim without proof counts as not proven.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem and evidence
+      description: What is wrong, what you expected, and links that prove it.
+      placeholder: |
+        Expected: ...
+        Actual: ...
+        Evidence: https://github.com/...
+    validations:
+      required: true
+  - type: textarea
+    id: option-a
+    attributes:
+      label: Option A
+      description: One way to fix it, with the evidence for and against.
+    validations:
+      required: true
+  - type: textarea
+    id: option-b
+    attributes:
+      label: Option B
+      description: A second, genuinely different way to fix it, with the evidence for and against.
+    validations:
+      required: true
+  - type: textarea
+    id: option-more
+    attributes:
+      label: More options
+      description: Any further options (C, D, ...).
+    validations:
+      required: false
+  - type: textarea
+    id: recommendation
+    attributes:
+      label: Recommendation
+      description: Which option, and why that evidence wins.
+    validations:
+      required: true
+  - type: textarea
+    id: blast-radius
+    attributes:
+      label: Blast radius
+      description: What the fix can touch (files, systems, players, deploys) and what it cannot.
+    validations:
+      required: true
+  - type: textarea
+    id: root-cause
+    attributes:
+      label: Root cause
+      description: Why it happens, not only where it shows. Link the code at a pinned SHA.
+    validations:
+      required: true
+  - type: textarea
+    id: regression-origin
+    attributes:
+      label: Regression origin
+      description: The commit or PR that introduced it (link it), or "never worked" with the evidence for that.
+    validations:
+      required: true

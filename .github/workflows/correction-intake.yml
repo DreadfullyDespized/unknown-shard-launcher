@@ -1,0 +1,77 @@
+name: correction-intake
+
+on:
+  workflow_run:
+    workflows: ["CI", "correction-loop tests"]
+    types: [completed]
+  deployment_status:
+  issue_comment:
+    types: [created]
+  pull_request_review:
+    types: [submitted]
+  issues:
+    types: [opened, labeled]
+  workflow_dispatch:
+    inputs:
+      kind:
+        description: "correction opens a Dread correction from target and body; run, comment, review or issue replays a real event"
+        required: true
+        type: choice
+        options: [correction, run, comment, review, issue]
+      target:
+        description: "kind=correction: the correction title. Otherwise the run id, comment id, PR/review id, or issue number"
+        required: true
+        type: string
+      body:
+        description: "kind=correction: what was wrong and what Dread wants instead (add Required level: 1 or 2 to pin the level)"
+        required: false
+        type: string
+        default: ""
+      action:
+        description: "kind=issue: opened or labeled"
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+  pull-requests: read
+
+jobs:
+  signature:
+    if: >-
+      (github.event_name != 'workflow_run' ||
+      contains(fromJSON('["failure","timed_out","startup_failure"]'), github.event.workflow_run.conclusion)) &&
+      (github.event_name != 'deployment_status' ||
+      contains(fromJSON('["failure","error"]'), github.event.deployment_status.state))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      group: ${{ steps.keys.outputs.group }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Compute the dedupe signature
+        id: keys
+        run: python3 tools/correction_loop/loop.py keys
+        env:
+          GH_TOKEN: ${{ github.token }}
+  intake:
+    needs: signature
+    if: needs.signature.outputs.group != ''
+    concurrency:
+      group: correction-intake-${{ github.repository }}-${{ needs.signature.outputs.group }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Open or update the correction issue
+        run: python3 tools/correction_loop/loop.py intake
+        env:
+          GH_TOKEN: ${{ github.token }}

@@ -1,0 +1,22 @@
+{
+  "watched_workflows": [
+    "CI",
+    "correction-loop tests"
+  ],
+  "required_checks": [],
+  "watch_deployments": true,
+  "deploy_environments": [],
+  "pending_workflows": [],
+  "docs": "docs/correction-loop.md",
+  "timezone": "America/Chicago",
+  "grader": {
+    "min_pr_age_minutes": 30,
+    "min_sha_chars": 40,
+    "require_grader_run": true,
+    "grader_run_max_age_hours": 24,
+    "grader_logins": [
+      "DreadfullyDespized"
+    ],
+    "max_relay_wait_minutes": 30
+  }
+}
