@@ -160,15 +160,16 @@ def relay_target(event_name, payload):
             return None
         if not parse_verdict((payload.get("comment") or {}).get("body")):
             return None
-        return issue["number"], True
+        return issue["number"]
     if event_name == "pull_request_review":
         if not parse_verdict((payload.get("review") or {}).get("body")):
             return None
-        return (payload.get("pull_request") or {})["number"], False
+        return (payload.get("pull_request") or {})["number"]
     return None
 
 
 PR_RUN_EVENTS = ("pull_request", "pull_request_review")
+MAX_RERUNS = 20
 
 
 def retrigger(api, pr):
@@ -178,11 +179,12 @@ def retrigger(api, pr):
     sha = head.get("sha")
     runs = (api.get(f"/repos/{api.repo}/actions/workflows/{WORKFLOW_FILE}/runs?head_sha={sha}&per_page=100") or {}).get("workflow_runs") or []
     mine = [r for r in runs if r.get("event") in PR_RUN_EVENTS and r.get("head_sha") == sha]
-    done = sorted((r for r in mine if r.get("status") == "completed"), key=lambda r: (r.get("created_at") or "", r.get("id") or 0))
+    done = sorted((r for r in mine if r.get("status") == "completed"),
+                  key=lambda r: (r.get("created_at") or "", r.get("id") or 0), reverse=True)[:MAX_RERUNS]
     if done:
-        run = done[-1]
-        api.post(f"/repos/{api.repo}/actions/runs/{run['id']}/rerun", {})
-        return {"action": "rerun", "run_id": run["id"], "event": run.get("event"), "head_sha": sha, "pr": pr["number"]}
+        for run in done:
+            api.post(f"/repos/{api.repo}/actions/runs/{run['id']}/rerun", {})
+        return {"action": "rerun", "run_ids": [r["id"] for r in done], "head_sha": sha, "pr": pr["number"]}
     api.post(f"/repos/{api.repo}/actions/workflows/{WORKFLOW_FILE}/dispatches",
              {"ref": head.get("ref"), "inputs": {"pr": str(pr["number"])}})
     return {"action": "dispatched", "ref": head.get("ref"), "head_sha": sha, "pr": pr["number"]}
@@ -192,7 +194,7 @@ def relay(api, cfg, event_name, payload, sleep=time.sleep, now=datetime.now):
     found = relay_target(event_name, payload)
     if not found:
         return {"action": "skipped", "why": "no Verdict line on a pull request"}
-    number, always = found
+    number = found
     pr, items = fetch(api, number)
     head = (pr.get("head") or {}).get("sha") or ""
     result = evaluate(pr, head, items, now(timezone.utc), cfg)
@@ -207,8 +209,6 @@ def relay(api, cfg, event_name, payload, sleep=time.sleep, now=datetime.now):
         pr, items = fetch(api, number)
         if (pr.get("head") or {}).get("sha") != head:
             return {"action": "skipped", "why": "the PR head moved while waiting; that push re-runs grader"}
-    elif not always:
-        return {"action": "skipped", "why": "the review event already ran the grader check", "result": result}
     out = retrigger(api, pr)
     out["waited_seconds"] = waited
     return out

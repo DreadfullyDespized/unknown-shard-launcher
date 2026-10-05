@@ -7,7 +7,7 @@ Every workflow uses only the workflow `GITHUB_TOKEN` and runs on `ubuntu-latest`
 | Workflow | Trigger | What it does |
 |---|---|---|
 | `grader.yml` (check `grader`) | PR opened, synchronize, reopened, labeled, unlabeled, ready for review; review submitted, edited, dismissed; manual dispatch | FAILS unless a grader PASS names the current head SHA and the PR is old enough |
-| `grader-relay.yml` | a PR comment or review whose first line starts `Verdict: ` | re-runs `grader` on the PR head branch, waiting out the minimum age first when a PASS arrives early |
+| `grader-relay.yml` | a PR comment or review whose first line starts `Verdict: ` | re-runs the PR's own `grader` runs for the current head (so the result shows on the PR), waiting out the minimum age first when a PASS arrives early |
 | `correction-intake.yml` | a watched workflow fails on `main`, a deployment fails, a grader FAIL, a Dread correction | opens an issue labeled `correction`, or comments on the open one with the same key |
 | `correction-close-gate.yml` | an issue labeled `correction` is closed | reopens it unless it links a merged level 1 or level 2 fix PR |
 | `correction-loop tests` | every PR and every push to `main` | unit tests for all of the above plus the issue forms |
@@ -38,9 +38,11 @@ Verdict: PASS 0123456789abcdef0123456789abcdef01234567
 Checked: proof links, CI runs, blast radius.
 ```
 
-A PASS posted before the PR is 30 minutes old leaves the check red; `grader-relay` waits until the PR is old enough and
-re-runs `grader` (at most `max_relay_wait_minutes`). To re-run by hand:
-`gh workflow run grader.yml --ref <head branch> -f pr=<N>`. A dispatched run checks that the branch tip is still the PR head.
+Every new verdict makes `grader-relay` re-run each completed `grader` run of the PR for the current head (pull_request and
+review runs), so every `grader` entry on the PR shows the current answer. A PASS posted before the PR is 30 minutes old leaves
+the check red; `grader-relay` waits until the PR is old enough first (at most `max_relay_wait_minutes`).
+To re-run by hand: `gh run rerun <grader run id>` on the PR's latest `grader` run. `gh workflow run grader.yml --ref <head branch> -f pr=<N>`
+also works and checks that the branch tip is still the PR head, but a dispatched run is recorded on the commit only and is not listed in the PR's checks.
 
 Branch protection and rulesets are not changed by this repo's files. CONTRIBUTING.md asks for `grader` to be green before merge.
 

@@ -2,7 +2,7 @@ name: correction-intake
 
 on:
   workflow_run:
-    workflows: ["correction-loop tests"]
+    workflows: ["CI", "correction-loop tests"]
     types: [completed]
   deployment_status:
   issue_comment:

@@ -1,5 +1,6 @@
 {
   "watched_workflows": [
+    "CI",
     "correction-loop tests"
   ],
   "required_checks": [],

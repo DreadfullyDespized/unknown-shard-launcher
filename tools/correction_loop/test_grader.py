@@ -162,7 +162,16 @@ class Relay(unittest.TestCase):
         out = grader.relay(api, CFG, "issue_comment", self.payload(f"Verdict: PASS {HEAD}"),
                            sleep=lambda s: None, now=lambda tz: CREATED + timedelta(minutes=45))
         self.assertEqual(out["action"], "rerun")
-        self.assertEqual(api.posts, [("/repos/owner/repo/actions/runs/42/rerun", {})])
+        self.assertEqual(api.posts, [("/repos/owner/repo/actions/runs/42/rerun", {}),
+                                     ("/repos/owner/repo/actions/runs/41/rerun", {})])
+
+    def test_running_grader_run_is_not_rerun(self):
+        runs = [{"id": 41, "event": "pull_request", "status": "completed", "head_sha": HEAD, "created_at": "2026-10-04T12:00:10Z"},
+                {"id": 42, "event": "pull_request_review", "status": "in_progress", "head_sha": HEAD, "created_at": "2026-10-04T12:05:00Z"}]
+        api = FakeApi(pr(), [comment(f"Verdict: FAIL {HEAD}")], runs=runs)
+        grader.relay(api, CFG, "issue_comment", self.payload(f"Verdict: FAIL {HEAD}"),
+                     sleep=lambda s: None, now=lambda tz: CREATED + timedelta(minutes=45))
+        self.assertEqual(api.posts, [("/repos/owner/repo/actions/runs/41/rerun", {})])
 
     def test_no_pr_run_falls_back_to_dispatch_on_head_branch(self):
         api = FakeApi(pr(), [comment(f"Verdict: PASS {HEAD}")], runs=[])
@@ -196,13 +205,13 @@ class Relay(unittest.TestCase):
         out = grader.relay(api, CFG, "issue_comment", self.payload("looks good"), sleep=lambda s: None)
         self.assertEqual(out["action"], "skipped")
 
-    def test_review_without_wait_does_not_dispatch(self):
-        api = FakeApi(pr(), reviews=[review(f"Verdict: PASS {HEAD}")])
-        payload = {"action": "submitted", "review": {"body": f"Verdict: PASS {HEAD}"}, "pull_request": {"number": 7}}
+    def test_review_fail_reruns_earlier_green_runs(self):
+        api = FakeApi(pr(), reviews=[review(f"Verdict: FAIL {HEAD}")])
+        payload = {"action": "submitted", "review": {"body": f"Verdict: FAIL {HEAD}"}, "pull_request": {"number": 7}}
         out = grader.relay(api, CFG, "pull_request_review", payload, sleep=lambda s: None,
                            now=lambda tz: CREATED + timedelta(minutes=45))
-        self.assertEqual(out["action"], "skipped")
-        self.assertEqual(api.posts, [])
+        self.assertEqual(out["action"], "rerun")
+        self.assertEqual(api.posts, [("/repos/owner/repo/actions/runs/41/rerun", {})])
 
     def test_fork_head_is_not_dispatched(self):
         fork = pr()
