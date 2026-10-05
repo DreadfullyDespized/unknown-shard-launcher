@@ -2,14 +2,116 @@
 import argparse
 import bisect
 import fnmatch
+import json
 import os
 import re
 import subprocess
 import sys
 import tempfile
 
-EXEMPT_PATHS = (
-)
+CONFIG_NAME = "no-comments.json"
+
+
+CONFIG_SCHEMA = {
+    "exempt_paths": "list of non-empty strings",
+    "directives": "list of {name, pattern, max_line} objects",
+    "self_test_cases": "list of {path, text, comment_lines} objects",
+}
+DIRECTIVE_KEYS = ("name", "pattern", "max_line")
+SELF_TEST_KEYS = ("path", "text", "comment_lines")
+
+
+class ConfigError(ValueError):
+    pass
+
+
+def reject_duplicate_keys(pairs):
+    seen = {}
+    for key, value in pairs:
+        if key in seen:
+            raise ConfigError("duplicate key %r" % key)
+        seen[key] = value
+    return seen
+
+
+def is_int(value):
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def require_object(value, keys, where):
+    if not isinstance(value, dict):
+        raise ConfigError("%s must be an object with keys %s, got %s" % (where, list(keys), type(value).__name__))
+    extra = sorted(set(value) - set(keys))
+    missing = [k for k in keys if k not in value]
+    if extra:
+        raise ConfigError("%s has unknown key(s) %s; allowed keys are %s" % (where, extra, list(keys)))
+    if missing:
+        raise ConfigError("%s is missing required key(s) %s" % (where, missing))
+
+
+def require_list(value, where):
+    if not isinstance(value, list):
+        raise ConfigError("%s must be a list, got %s" % (where, type(value).__name__))
+
+
+def require_text(value, where, allow_empty=False):
+    if not isinstance(value, str) or (not allow_empty and not value):
+        raise ConfigError("%s must be a %sstring, got %r" % (where, "" if allow_empty else "non-empty ", value))
+
+
+def parse_config(text, where):
+    try:
+        data = json.loads(text, object_pairs_hook=reject_duplicate_keys)
+    except ConfigError as error:
+        raise ConfigError("%s: %s" % (where, error))
+    except ValueError as error:
+        raise ConfigError("%s: invalid JSON: %s" % (where, error))
+    require_object(data, tuple(CONFIG_SCHEMA), where)
+    require_list(data["exempt_paths"], where + ".exempt_paths")
+    for i, pattern in enumerate(data["exempt_paths"]):
+        require_text(pattern, "%s.exempt_paths[%d]" % (where, i))
+    require_list(data["directives"], where + ".directives")
+    for i, directive in enumerate(data["directives"]):
+        at = "%s.directives[%d]" % (where, i)
+        require_object(directive, DIRECTIVE_KEYS, at)
+        require_text(directive["name"], at + ".name")
+        require_text(directive["pattern"], at + ".pattern")
+        try:
+            re.compile(directive["pattern"])
+        except re.error as error:
+            raise ConfigError("%s.pattern is not a valid regex: %s" % (at, error))
+        limit = directive["max_line"]
+        if limit is not None and not (is_int(limit) and limit >= 1):
+            raise ConfigError("%s.max_line must be null or an integer >= 1, got %r" % (at, limit))
+    require_list(data["self_test_cases"], where + ".self_test_cases")
+    for i, case in enumerate(data["self_test_cases"]):
+        at = "%s.self_test_cases[%d]" % (where, i)
+        require_object(case, SELF_TEST_KEYS, at)
+        require_text(case["path"], at + ".path")
+        require_text(case["text"], at + ".text", allow_empty=True)
+        require_list(case["comment_lines"], at + ".comment_lines")
+        for j, line in enumerate(case["comment_lines"]):
+            if not (is_int(line) and line >= 1):
+                raise ConfigError("%s.comment_lines[%d] must be an integer >= 1, got %r" % (at, j, line))
+    return data
+
+
+def load_repo_config():
+    path = os.environ.get("NO_COMMENTS_CONFIG") or os.path.join(os.path.dirname(os.path.abspath(__file__)), CONFIG_NAME)
+    if not os.path.exists(path):
+        raise SystemExit("%s not found; every repo ships its per-repo settings there (use empty lists for none)." % path)
+    with open(path, encoding="utf-8") as handle:
+        text = handle.read()
+    try:
+        return parse_config(text, path)
+    except ConfigError as error:
+        raise SystemExit("Invalid no-comments config: %s" % error)
+
+
+REPO_CONFIG = load_repo_config()
+EXEMPT_PATHS = tuple(REPO_CONFIG["exempt_paths"])
+REPO_DIRECTIVES = tuple((d["name"], d["pattern"], d["max_line"]) for d in REPO_CONFIG["directives"])
+REPO_SELF_TEST_CASES = tuple((c["path"], c["text"], c["comment_lines"]) for c in REPO_CONFIG["self_test_cases"])
 
 GLOBAL_EXEMPT_PATHS = (
     ".git/*",
@@ -26,7 +128,6 @@ GLOBAL_EXEMPT_PATHS = (
     "*.import",
     "*.tscn",
     "*.tres",
-    "*.md",
     "LICENSE*",
     "package-lock.json",
     "project.godot",
@@ -65,6 +166,7 @@ MIRC = {".mrc", ".ini_mirc"}
 LUA = {".lua"}
 SQL = {".sql"}
 BATCH = {".bat", ".cmd"}
+MARKDOWN = {".md", ".markdown"}
 NAMED = {"Dockerfile": "shell", "Makefile": "shell", ".prettierrc": "c"}
 
 
@@ -77,7 +179,7 @@ def language_for(path, text):
         (C_LIKE, "c"), (JS_LIKE, "js"), (JSX_LIKE, "jsx"), (GO_LIKE, "go"), (CSS_LIKE, "css"), (SCSS_LIKE, "c"),
         (PY_LIKE, "py"), (SHELL_LIKE, "shell"), (POWERSHELL, "powershell"), (YAML_LIKE, "yaml"),
         (INI_LIKE, "ini"), (XML_LIKE, "xml"), (AHK, "ahk"), (MIRC, "mirc"), (LUA, "lua"),
-        (SQL, "sql"), (BATCH, "batch"),
+        (SQL, "sql"), (BATCH, "batch"), (MARKDOWN, "markdown"),
     ):
         if ext in group:
             return "cs" if ext == ".cs" else lang
@@ -499,7 +601,7 @@ SCANNERS = {
     "lua": scan_lua, "sql": scan_sql,
 }
 
-COMPILED_DIRECTIVES = tuple((name, re.compile(pattern), limit) for name, pattern, limit in DIRECTIVES)
+COMPILED_DIRECTIVES = tuple((name, re.compile(pattern), limit) for name, pattern, limit in DIRECTIVES + REPO_DIRECTIVES)
 
 
 def directive_name(comment_text, line):
@@ -520,10 +622,67 @@ def is_exempt(path):
     return False
 
 
+FENCE_LANGUAGES = {
+    "sh": "shell", "bash": "shell", "shell": "shell", "zsh": "shell", "ksh": "shell", "dash": "shell",
+    "dockerfile": "shell", "docker": "shell", "makefile": "shell", "make": "shell",
+    "powershell": "powershell", "pwsh": "powershell", "ps1": "powershell", "ps": "powershell",
+    "python": "py", "python3": "py", "py": "py", "gdscript": "py", "gd": "py", "toml": "py", "ruby": "py", "rb": "py",
+    "js": "js", "javascript": "js", "mjs": "js", "cjs": "js", "ts": "js", "typescript": "js", "node": "js",
+    "jsx": "jsx", "tsx": "jsx",
+    "c": "c", "h": "c", "cpp": "c", "c++": "c", "java": "c", "kotlin": "c", "kt": "c", "swift": "c",
+    "json": "c", "jsonc": "c", "json5": "c", "glsl": "c", "hlsl": "c", "gdshader": "c", "scss": "c", "less": "c",
+    "cs": "cs", "csharp": "cs", "c#": "cs",
+    "go": "go", "golang": "go", "css": "css",
+    "yaml": "yaml", "yml": "yaml",
+    "ini": "ini", "cfg": "ini", "conf": "ini", "properties": "ini",
+    "xml": "xml", "html": "xml", "svg": "xml", "xaml": "xml", "vue": "xml",
+    "sql": "sql", "lua": "lua", "bat": "batch", "batch": "batch", "cmd": "batch",
+    "ahk": "ahk", "autohotkey": "ahk",
+}
+FENCE_OPEN = re.compile(r"^( {0,3})(`{3,}|~{3,})[ \t]*([^\s`{]*)")
+
+
+def fenced_blocks(text):
+    lines = text.split("\n")
+    blocks = []
+    i = 0
+    while i < len(lines):
+        m = FENCE_OPEN.match(lines[i])
+        if not m:
+            i += 1
+            continue
+        fence = m.group(2)
+        tag = m.group(3).strip().lower().lstrip(".")
+        close = re.compile(r"^ {0,3}" + re.escape(fence[0]) + "{" + str(len(fence)) + r",}[ \t]*$")
+        j = i + 1
+        while j < len(lines) and not close.match(lines[j].rstrip("\r")):
+            j += 1
+        blocks.append((tag, i + 2, "\n".join(lines[i + 1:j]) + "\n"))
+        i = j + 1
+    return blocks
+
+
+def markdown_comments(text):
+    newlines = [k for k, ch in enumerate(text) if ch == "\n"]
+    results = []
+    for tag, first_line, block in fenced_blocks(text):
+        lang = FENCE_LANGUAGES.get(tag)
+        if lang is None:
+            continue
+        offset = newlines[first_line - 2] + 1
+        for first, last, body, start, end in SCANNERS[lang](block, lang):
+            if directive_name(body, first):
+                continue
+            results.append((first + first_line - 1, last + first_line - 1, body, start + offset, end + offset))
+    return results
+
+
 def find_comments(path, text):
     lang = language_for(path, text)
     if lang is None:
         return []
+    if lang == "markdown":
+        return markdown_comments(text)
     results = []
     for first, last, body, start, end in SCANNERS[lang](text, lang):
         if directive_name(body, first):
@@ -640,6 +799,60 @@ SELF_TEST_CASES = (
     ("a.sql", "SELECT '--no' FROM t; -- c\n", [1]),
     ("a.bat", "@echo off\nrem c\n:: c\nREM c\necho rem\n", [2, 3, 4]),
     ("a.md", "# Heading\n", []),
+    ("a.md", "# Title\n\n```sh\necho hi # note\nls\n```\n", [4]),
+    ("a.md", "```bash\n#!/bin/bash\n# shellcheck disable=SC2086\necho \"#x\" a#b\n```\n", []),
+    ("a.md", "```\n# untagged fence is not scanned\n```\n~~~python\nx = 1  # c\n~~~\n", [5]),
+    ("a.md", "````md\n```sh\n# example inside a markdown fence\n```\n````\n", []),
+    ("a.md", "```powershell\n$a = 1 # c\n```\n\n```js\nconst u = 'http://x'; // c\n```\n", [2, 6]),
+    ("a.md", "  ```yaml\n  key: v # c\n  ```\n```ts {title=x}\n/* c */\n```\n", [2, 5]),
+    ("a.md", "Text # not code\n<!-- html note -->\n```sh\nls\n", []),
+    ("a.md", "```sh\nls\n# unclosed fence runs to end of file\n", [3]),
+)
+
+
+def config_text(exempt="[]", directives="[]", cases="[]", extra=""):
+    return '{"exempt_paths": %s, "directives": %s, "self_test_cases": %s%s}' % (exempt, directives, cases, extra)
+
+
+GOOD_DIRECTIVE = '{"name": "marker", "pattern": "<!--[ \\\\t]*m[ \\\\t]*-->", "max_line": null}'
+GOOD_CASE = '{"path": "a.npc", "text": "<x/>\\n<!-- n -->\\n", "comment_lines": [2]}'
+GOOD_CONFIGS = (
+    ("all lists empty", config_text()),
+    ("full config", config_text('["server-config/*"]', "[" + GOOD_DIRECTIVE + "]", "[" + GOOD_CASE + "]")),
+    ("integer max_line", config_text(directives='[{"name": "x", "pattern": "#x", "max_line": 2}]')),
+)
+BAD_CONFIGS = (
+    ("invalid JSON", "{", "invalid JSON"),
+    ("top level is a list", "[]", "must be an object"),
+    ("unknown top-level key", config_text(extra=', "exempt_path": []'), "unknown key(s) ['exempt_path']"),
+    ("missing top-level key", '{"exempt_paths": [], "directives": []}', "missing required key(s) ['self_test_cases']"),
+    ("duplicate top-level key", config_text(extra=', "directives": []'), "duplicate key 'directives'"),
+    ("exempt_paths is a string", config_text('"server-config/*"'), "exempt_paths must be a list"),
+    ("exempt_paths is an object", config_text('{"a": 1}'), "exempt_paths must be a list"),
+    ("exempt_paths entry is a number", config_text("[1]"), "exempt_paths[0] must be a non-empty string"),
+    ("exempt_paths entry is empty", config_text('[""]'), "exempt_paths[0] must be a non-empty string"),
+    ("directives is an object", config_text(directives="{}"), "directives must be a list"),
+    ("directive is a string", config_text(directives='["x"]'), "directives[0] must be an object"),
+    ("directive has max_lines typo", config_text(directives='[{"name": "x", "pattern": "#x", "max_line": null, "max_lines": 1}]'), "unknown key(s) ['max_lines']"),
+    ("directive misses max_line", config_text(directives='[{"name": "x", "pattern": "#x"}]'), "missing required key(s) ['max_line']"),
+    ("directive name is a number", config_text(directives='[{"name": 1, "pattern": "#x", "max_line": null}]'), "directives[0].name must be"),
+    ("directive name is empty", config_text(directives='[{"name": "", "pattern": "#x", "max_line": null}]'), "directives[0].name must be"),
+    ("directive pattern is a list", config_text(directives='[{"name": "x", "pattern": ["#x"], "max_line": null}]'), "directives[0].pattern must be"),
+    ("directive pattern is not a regex", config_text(directives='[{"name": "x", "pattern": "(", "max_line": null}]'), "not a valid regex"),
+    ("directive max_line is a string", config_text(directives='[{"name": "x", "pattern": "#x", "max_line": "1"}]'), "max_line must be null or an integer"),
+    ("directive max_line is a bool", config_text(directives='[{"name": "x", "pattern": "#x", "max_line": true}]'), "max_line must be null or an integer"),
+    ("directive max_line is zero", config_text(directives='[{"name": "x", "pattern": "#x", "max_line": 0}]'), "max_line must be null or an integer"),
+    ("directive max_line is a float", config_text(directives='[{"name": "x", "pattern": "#x", "max_line": 1.5}]'), "max_line must be null or an integer"),
+    ("self_test_cases is a string", config_text(cases='"a.py"'), "self_test_cases must be a list"),
+    ("self-test entry is a list", config_text(cases='[["a.py", "x", []]]'), "self_test_cases[0] must be an object"),
+    ("self-test entry has an extra key", config_text(cases='[{"path": "a.py", "text": "x", "comment_lines": [], "note": "y"}]'), "unknown key(s) ['note']"),
+    ("self-test entry misses comment_lines", config_text(cases='[{"path": "a.py", "text": "x"}]'), "missing required key(s) ['comment_lines']"),
+    ("self-test path is empty", config_text(cases='[{"path": "", "text": "x", "comment_lines": []}]'), "self_test_cases[0].path must be"),
+    ("self-test text is a number", config_text(cases='[{"path": "a.py", "text": 1, "comment_lines": []}]'), "self_test_cases[0].text must be a string"),
+    ("self-test comment_lines is a string", config_text(cases='[{"path": "a.py", "text": "x", "comment_lines": "3"}]'), "comment_lines must be a list"),
+    ("self-test comment_lines has a bool", config_text(cases='[{"path": "a.py", "text": "x", "comment_lines": [true]}]'), "comment_lines[0] must be an integer"),
+    ("self-test comment_lines has zero", config_text(cases='[{"path": "a.py", "text": "x", "comment_lines": [0]}]'), "comment_lines[0] must be an integer"),
+    ("duplicate key inside a directive", config_text(directives='[{"name": "x", "name": "y", "pattern": "#x", "max_line": null}]'), "duplicate key 'name'"),
 )
 
 
@@ -652,8 +865,9 @@ DIFF_TEST_HEAD = {
     "edit.ts": "export const a = 1;\n// added comment\nexport const b = '//not';\n",
     "new.sh": "#!/bin/sh\n# shellcheck disable=SC2086\necho hi # added\n",
     "node_modules/x/index.js": "// vendored\n",
+    "docs/run.md": "# Run\n\n```sh\nmake test # added\n```\n",
 }
-DIFF_TEST_EXPECTED = [("edit.ts", 2), ("new.sh", 3)]
+DIFF_TEST_EXPECTED = [("docs/run.md", 4), ("edit.ts", 2), ("new.sh", 3)]
 
 
 def diff_self_test():
@@ -679,21 +893,55 @@ def diff_self_test():
 
 def self_test():
     failures = diff_self_test()
-    for path, text, expected in SELF_TEST_CASES:
+    for path, text, expected in SELF_TEST_CASES + REPO_SELF_TEST_CASES:
         got = sorted({n for first, last, _b, _s, _e in find_comments(path, text) for n in range(first, last + 1)})
         if got != expected:
             failures += 1
             print("FAIL %s %r: expected %s got %s" % (path, text, expected, got))
-    exempt_cases = (("node_modules/x/a.js", True), (".vercel/output/a.mjs", True), ("src/a.ts", False), ("README.md", True))
+    exempt_cases = (("node_modules/x/a.js", True), (".vercel/output/a.mjs", True), ("src/a.ts", False), ("README.md", False), ("node_modules/x/README.md", True))
     for path, expected in exempt_cases:
         if is_exempt(path) != expected:
             failures += 1
             print("FAIL exempt %s: expected %s" % (path, expected))
+    for label, text, expected in BAD_CONFIGS:
+        try:
+            parse_config(text, "self-test")
+            failures += 1
+            print("FAIL bad config accepted: %s" % label)
+        except ConfigError as error:
+            if expected not in str(error):
+                failures += 1
+                print("FAIL bad config %s: expected %r in %r" % (label, expected, str(error)))
+    for label, text in GOOD_CONFIGS:
+        try:
+            parse_config(text, "self-test")
+        except ConfigError as error:
+            failures += 1
+            print("FAIL good config rejected: %s: %s" % (label, error))
+    with tempfile.TemporaryDirectory() as tmp:
+        bad = os.path.join(tmp, CONFIG_NAME)
+        with open(bad, "w", encoding="utf-8") as handle:
+            handle.write('{"exempt_paths": "x", "directives": [], "self_test_cases": []}')
+        saved = os.environ.get("NO_COMMENTS_CONFIG")
+        os.environ["NO_COMMENTS_CONFIG"] = bad
+        try:
+            load_repo_config()
+            failures += 1
+            print("FAIL load_repo_config accepted a string exempt_paths")
+        except SystemExit as error:
+            if "exempt_paths must be a list" not in str(error):
+                failures += 1
+                print("FAIL unclear config error: %s" % error)
+        finally:
+            if saved is None:
+                os.environ.pop("NO_COMMENTS_CONFIG")
+            else:
+                os.environ["NO_COMMENTS_CONFIG"] = saved
     for path in EXEMPT_PATHS:
         if not is_exempt(path.rstrip("*").rstrip("/") + ("/x" if path.endswith("/*") else "")):
             failures += 1
             print("FAIL exempt list entry %s does not match itself" % path)
-    print("self-test: %d cases, %d failures" % (1 + len(SELF_TEST_CASES) + len(exempt_cases) + len(EXEMPT_PATHS), failures))
+    print("self-test: %d cases, %d failures" % (2 + len(BAD_CONFIGS) + len(GOOD_CONFIGS) + len(SELF_TEST_CASES) + len(REPO_SELF_TEST_CASES) + len(exempt_cases) + len(EXEMPT_PATHS), failures))
     return failures == 0
 
 
