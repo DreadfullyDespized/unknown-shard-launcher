@@ -38,6 +38,7 @@ jobs:
       - name: "Workflow lint: one PR gate job, timeouts, no label triggers, no long sleeps"
         if: ${{ !cancelled() }}
         run: python tools/check_workflows.py
+      - run: bash tools/check_no_secrets.sh
       - name: "No comments: self-test"
         if: ${{ !cancelled() }}
         run: python tools/check_no_comments.py --self-test

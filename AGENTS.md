@@ -12,6 +12,7 @@ Public MIT ClassicUO auto-updater and launcher. Holds no server-specific values;
 - Code comments of any kind (enforced by `tools/check_no_comments.py`).
 - Committing server addresses, ports, IPs, patch URLs, keys, secrets, or internal paths (public repo).
 - Extra outline docs beside this file.
+- Passwords/secrets must never be committed or documented in-repo (cleartext or otherwise); use env/secret store (e.g. `ART_ZIP_PASSWORD`). Enforced by `tools/check_no_secrets.sh`.
 
 ## Pointers
 - [CONTRIBUTING.md](CONTRIBUTING.md) — process, grader/correction loop, public-repo rule
