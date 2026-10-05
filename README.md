@@ -1,3 +1,5 @@
+**Repo label: TEST** — see [CONTRIBUTING.md](CONTRIBUTING.md#repo-label-test) for the required process.
+
 # Unknown Shard Launcher
 
 This is the open-source (MIT) auto-updater and launcher for the **Unknown Shard** Ultima Online free shard.
