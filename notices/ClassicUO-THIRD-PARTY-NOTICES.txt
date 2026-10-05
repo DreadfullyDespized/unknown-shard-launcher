@@ -1,10 +1,10 @@
-Third-party notices for the ClassicUO client mirrored by Unknown Shard
+Third-party notices for the ClassicUO client mirrored by this launcher
 ======================================================================
 
-The Unknown Shard launcher downloads an UNMODIFIED official ClassicUO Windows
+This launcher downloads an UNMODIFIED official ClassicUO Windows
 release build (ClassicUO-win-x64-release.zip, Authenticode-signed by
-"SignPath Foundation") from the Unknown Shard patch server and extracts it into
-%LOCALAPPDATA%\UnknownShard\cuo\. The upstream zip ships without license files,
+"SignPath Foundation") from the configured patch server and extracts it into
+%LOCALAPPDATA%\<launcher data folder>\cuo\. The upstream zip ships without license files,
 so the notices below are reproduced here as required for binary redistribution.
 Source code: https://github.com/ClassicUO/ClassicUO (the exact commit is listed
 in the signed patch manifest, field cuo.version).
