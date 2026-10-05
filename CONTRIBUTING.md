@@ -12,6 +12,13 @@
 4. Never skip checks; no force-push to shared branches.
 5. Review by someone other than the author.
 
+## Grader check and correction loop
+
+- **`grader` must be green before merge.** The `grader` check fails by default. It passes only when the latest PR comment or review that names the current head starts with `Verdict: PASS <sha>` (12+ hex characters of the head commit), from a login in `grader_logins` that is not a bot, and the PR is at least 30 minutes old. Any push makes the old PASS stale. Branch protection is not changed; this rule is the gate.
+- **Correction issues:** a failed watched workflow on `main`, a failed deployment, a `Verdict: FAIL` line, the `dread-correction` label, a `/correction` comment or `gh workflow run correction-intake.yml -f kind=correction -f target="<title>"` opens an issue labeled `correction`. It stays closed only when it links a merged PR whose `## For Dread` has its own `**Level:** 1` (codebase) or `**Level:** 2` (lint/CI) line before Proof.
+- **Issues:** open them with the Bug, Improvement or Feature form in `.github/ISSUE_TEMPLATE/`.
+- Details and settings: `docs/correction-loop.md`, `tools/correction_loop/config.json`.
+
 ## Public repo rule
 
 This repository is public. Never commit server addresses, ports, IPs, patch URLs, keys, secrets or internal paths. Server-specific values are supplied at build time from a private config (see `launcher.build.example.props` once the launcher code lands).
