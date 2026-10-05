@@ -7,3 +7,6 @@ TestResults/
 *.pem.key
 *-private*.pem
 secrets/
+# Server-specific build config and keys (supplied by the private server repo at build time)
+launcher.build.props
+keys/

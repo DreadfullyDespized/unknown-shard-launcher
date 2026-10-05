@@ -1,4 +1,4 @@
-# Pinned ClassicUO mirror (unknown-shard#194)
+# Pinned ClassicUO mirror
 
 The launcher never downloads ClassicUO from GitHub. The upstream `ClassicUO-main-release` assets are re-uploaded in place, so the same URL returns different bytes over time; on 2026-09-29, for example, the win-x64 asset was updated at 01:25 CT. Instead, the shard host mirrors **one** official zip, content-addressed, and the signed manifest pins it.
 
@@ -27,7 +27,7 @@ No ClassicUO binaries are committed to any git repo.
    - more than 2000 entries;
    - more than 1 GiB expanded (counted while inflating; header sizes are not trusted).
 3. **Check the exe:** `ClassicUO.exe` must exist at the zip root. `WinVerifyTrust` (generic verify v2, no UI) must pass, and the signer CN must equal the pinned subject.
-4. **Write** `UnknownShard-THIRD-PARTY-NOTICES.txt` (the license notices, see below) and the hash index `.cuo-install.json`.
+4. **Write** `ClassicUO-THIRD-PARTY-NOTICES.txt` (the license notices, see below) and the hash index `.cuo-install.json`.
 5. **Swap:** move `cuo` to `cuo.old-*`, then `cuo.tmp-*` to `cuo`, then delete the old copy. If the move fails (for example, CUO is running), the old install stays.
 6. **Before every Play:** re-hash every indexed file and re-run the Authenticode check. An altered `ClassicUO.exe` is refused and Play stays disabled.
 
@@ -35,12 +35,12 @@ A refused ClassicUO update never blocks art or gumps updates, and it never remov
 
 Revocation is not checked online (`WTD_REVOKE_NONE` with cache-only URL retrieval), so offline players can still start. The SHA-256 pin in the signed manifest is the primary control.
 
-## Mirroring procedure (host side; to be wired into #190/#191)
+## Mirroring procedure (host side)
 1. On a Windows host, download `ClassicUO-win-x64-release.zip` from https://github.com/ClassicUO/ClassicUO/releases/tag/ClassicUO-main-release.
 2. Expand it and check the signature: `Get-AuthenticodeSignature .\ClassicUO.exe`. The status must be `Valid` and the signer subject must contain `CN=SignPath Foundation`.
-3. Run `Get-FileHash -Algorithm SHA256` on the zip, then copy the zip to `C:\unknown-shard-web\patch\objects\<sha256>`. Never overwrite an existing object.
+3. Run `Get-FileHash -Algorithm SHA256` on the zip, then copy the zip to `objects\<sha256>` under the patch server's web root. Never overwrite an existing object.
 4. Put the `cuo` block into the manifest source.
-   - Follow-up: ManifestTool (unknown-shard #200) does not yet read a `cuo` block from `manifest.src.json`. That is a small addition in the shard repo; the core schema and validator already handle it.
+   - Follow-up: the manifest signing tool does not yet read a `cuo` block from `manifest.src.json`. That is a small addition on the server side; the core schema and validator already handle it.
 
 Observed 2026-09-29 (a reference point only; the asset may change again):
 - Asset `ClassicUO-win-x64-release.zip`: 19,629,510 B, SHA-256 `cb556a076ba7dfa6a200255e36f57a236813801cdec5e106226117dcde536473`.
@@ -52,7 +52,7 @@ Observed 2026-09-29 (a reference point only; the asset may change again):
 - **ClassicUO is BSD 2-Clause** (https://github.com/ClassicUO/ClassicUO/blob/main/LICENSE.md). That license allows redistributing binaries, with or without modification. The condition: *"Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution."*
   - Mirroring the unmodified signed zip is therefore permitted, **provided we ship the notice**.
   - The upstream zip contains no license file, so the launcher writes the notices file into `cuo\`.
-  - The same text is in this repo (`notices/`) and should also go on the download page (#197/#198).
+  - The same text is in this repo (`notices/`) and should also go on the download page.
 - **Bundled components** carry their own licenses:
   - FNA: Ms-PL.
   - FNA3D, FAudio, Theorafile, SDL3, zlib: zlib License.
