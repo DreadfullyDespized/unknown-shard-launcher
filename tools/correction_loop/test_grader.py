@@ -128,14 +128,18 @@ class Verdicts(unittest.TestCase):
 
 
 class FakeApi:
-    def __init__(self, the_pr, comments=(), reviews=()):
+    def __init__(self, the_pr, comments=(), reviews=(), runs=None):
         self.repo = "owner/repo"
         self.the_pr = the_pr
         self.comments = list(comments)
         self.reviews = list(reviews)
+        self.runs = [{"id": 41, "event": "pull_request", "status": "completed", "head_sha": HEAD,
+                      "created_at": "2026-10-04T12:00:10Z"}] if runs is None else runs
         self.posts = []
 
     def get(self, path):
+        if "/actions/workflows/grader.yml/runs" in path:
+            return {"workflow_runs": self.runs}
         return self.the_pr
 
     def paged(self, path, key=None, limit=2000):
@@ -149,8 +153,19 @@ class Relay(unittest.TestCase):
     def payload(self, body):
         return {"action": "created", "issue": {"number": 7, "pull_request": {}}, "comment": {"body": body}}
 
-    def test_comment_verdict_dispatches_grader_on_head_branch(self):
-        api = FakeApi(pr(), [comment(f"Verdict: PASS {HEAD}")])
+    def test_comment_verdict_reruns_latest_pr_grader_run(self):
+        runs = [{"id": 41, "event": "pull_request", "status": "completed", "head_sha": HEAD, "created_at": "2026-10-04T12:00:10Z"},
+                {"id": 42, "event": "pull_request_review", "status": "completed", "head_sha": HEAD, "created_at": "2026-10-04T12:05:00Z"},
+                {"id": 43, "event": "workflow_dispatch", "status": "completed", "head_sha": HEAD, "created_at": "2026-10-04T12:09:00Z"},
+                {"id": 44, "event": "pull_request", "status": "completed", "head_sha": OLD, "created_at": "2026-10-04T12:10:00Z"}]
+        api = FakeApi(pr(), [comment(f"Verdict: PASS {HEAD}")], runs=runs)
+        out = grader.relay(api, CFG, "issue_comment", self.payload(f"Verdict: PASS {HEAD}"),
+                           sleep=lambda s: None, now=lambda tz: CREATED + timedelta(minutes=45))
+        self.assertEqual(out["action"], "rerun")
+        self.assertEqual(api.posts, [("/repos/owner/repo/actions/runs/42/rerun", {})])
+
+    def test_no_pr_run_falls_back_to_dispatch_on_head_branch(self):
+        api = FakeApi(pr(), [comment(f"Verdict: PASS {HEAD}")], runs=[])
         out = grader.relay(api, CFG, "issue_comment", self.payload(f"Verdict: PASS {HEAD}"),
                            sleep=lambda s: None, now=lambda tz: CREATED + timedelta(minutes=45))
         self.assertEqual(out["action"], "dispatched")
@@ -163,7 +178,7 @@ class Relay(unittest.TestCase):
         out = grader.relay(api, CFG, "issue_comment", self.payload(f"Verdict: PASS {HEAD}"),
                            sleep=slept.append, now=lambda tz: CREATED + timedelta(minutes=10))
         self.assertEqual(slept, [20 * 60 + 5])
-        self.assertEqual(out["action"], "dispatched")
+        self.assertEqual(out["action"], "rerun")
 
     def test_head_moved_while_waiting_skips(self):
         api = FakeApi(pr(), [comment(f"Verdict: PASS {HEAD}")])

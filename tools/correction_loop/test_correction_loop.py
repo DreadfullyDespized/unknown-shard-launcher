@@ -280,6 +280,10 @@ class RootLines(unittest.TestCase):
     def test_unittest_ids(self):
         self.assertEqual(loop.extract_root("FAIL: test_x (test_a.T.test_x)\n"), "tests failed: test_x (test_a.T.test_x)")
 
+    def test_unittest_summary_line_is_not_a_test_id(self):
+        log = "FAIL: test_red (test_x.T.test_red)\nFAILED (failures=1)\n"
+        self.assertEqual(loop.extract_root(log), "tests failed: test_red (test_x.T.test_red)")
+
     def test_error_line_masks_numbers_and_shas(self):
         self.assertEqual(loop.extract_root("##[error]exit 3 at deadbeefcafe\n"), "exit <n> at <sha>")
 
