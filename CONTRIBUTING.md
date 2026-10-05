@@ -22,7 +22,11 @@ This repository is public. Never commit server addresses, ports, IPs, patch URLs
 
 Everything an agent needs is in this file and the checks it names; no seat memory is required.
 
-- **PR body:** start with `## For Dread` (**Ask** / **What changes for you** / **Proof** / **NOT done**), then a non-empty `## Blast radius` (what the change can touch, what it cannot). The `PR body` check (`tools/check_pr_body.py`) fails a PR whose Blast radius is missing, empty, or a placeholder (`TBD`, `N/A`, `None`). Start from `.github/pull_request_template.md`.
+- **PR body:** the `PR body` check (`tools/check_pr_body.py`) requires:
+  - `## For Dread` with all four fields filled in: **Ask:**, **What changes for you:**, **Proof:**, **NOT done:**. **Proof:** needs at least one link, and every github.com `blob/` or `tree/` link in it must be pinned to a 40-hex commit SHA, not a branch. Run, PR, issue and commit URLs are fine.
+  - a non-empty `## Blast radius` (what the change can touch and what it cannot). `TBD`, `N/A`, `None` and a bare `Closes #N` line don't count.
+  - on bug or correction PRs (label `bug` or `correction`, or a title starting with `fix:`), also `## Root cause`, `## Regression origin` and `## Options` with at least 2 options (list items or `###` headings), each with an evidence link.
+  Start from `.github/pull_request_template.md`.
 - **No comments:** the `No comments` check fails any added comment line; only the machine directives listed above pass.
 - **QA floor is FAIL:** every claim counts as FAIL until it is proven with linked evidence (CI run URL, commit, log or test output). "Tested" without a link is a FAIL.
 - **Escaped bugs:** every bug found after merge adds a test case (unit, self-test or validator case) in the fix PR, one that would have caught it.

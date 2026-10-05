@@ -2,7 +2,7 @@ name: PR body
 
 on:
   pull_request:
-    types: [opened, edited, synchronize, reopened]
+    types: [opened, edited, synchronize, reopened, labeled, unlabeled]
 
 permissions:
   contents: read
@@ -16,7 +16,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: Self-test the checker
         run: python3 tools/check_pr_body.py --self-test
-      - name: Require a non-empty Blast radius section
+      - name: Require For Dread, Blast radius and bug-PR sections
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
         run: python3 tools/check_pr_body.py
