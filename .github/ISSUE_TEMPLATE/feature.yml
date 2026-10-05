@@ -1,0 +1,36 @@
+name: Feature
+description: Something new. Say what it does for Dread, how we know it is done, and how it rolls out.
+title: "Feature: "
+labels: [feature]
+body:
+  - type: textarea
+    id: for-dread
+    attributes:
+      label: What it does for Dread
+      description: In plain words, what Dread gets or stops having to do.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Checkable statements; each one is proven with a link before the PR merges.
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+  - type: textarea
+    id: rollout
+    attributes:
+      label: Rollout
+      description: How it reaches main and the live build, behind what switch, and how it is turned off or rolled back.
+    validations:
+      required: true
+  - type: textarea
+    id: blast-radius
+    attributes:
+      label: Blast radius
+      description: What the feature can touch (files, systems, players, deploys) and what it cannot.
+    validations:
+      required: true

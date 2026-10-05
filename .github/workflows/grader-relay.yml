@@ -1,0 +1,32 @@
+name: grader-relay
+
+on:
+  issue_comment:
+    types: [created, edited]
+  pull_request_review:
+    types: [submitted, edited]
+
+permissions:
+  contents: read
+  actions: write
+  pull-requests: read
+  issues: read
+
+jobs:
+  relay:
+    if: >-
+      startsWith(github.event.comment.body, 'Verdict: ') ||
+      startsWith(github.event.review.body, 'Verdict: ')
+    concurrency:
+      group: grader-relay-${{ github.event.issue.number || github.event.pull_request.number }}
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Re-run grader on the PR head after a verdict, waiting out the minimum age if needed
+        run: python3 tools/correction_loop/grader.py relay
+        env:
+          GH_TOKEN: ${{ github.token }}

@@ -1,0 +1,51 @@
+name: Improvement
+description: Something works but should work better. Show the evidence and weigh at least two options.
+title: "Improvement: "
+labels: [improvement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Every claim needs a link (CI run, log, screenshot, SHA-pinned file link). A claim without proof counts as not proven.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem and evidence
+      description: What is worse than it should be, and links that prove it.
+    validations:
+      required: true
+  - type: textarea
+    id: option-a
+    attributes:
+      label: Option A
+      description: One way to improve it, with the evidence for and against.
+    validations:
+      required: true
+  - type: textarea
+    id: option-b
+    attributes:
+      label: Option B
+      description: A second, genuinely different way, with the evidence for and against.
+    validations:
+      required: true
+  - type: textarea
+    id: option-more
+    attributes:
+      label: More options
+      description: Any further options (C, D, ...).
+    validations:
+      required: false
+  - type: textarea
+    id: recommendation
+    attributes:
+      label: Recommendation
+      description: Which option, and why that evidence wins.
+    validations:
+      required: true
+  - type: textarea
+    id: blast-radius
+    attributes:
+      label: Blast radius
+      description: What the change can touch (files, systems, players, deploys) and what it cannot.
+    validations:
+      required: true

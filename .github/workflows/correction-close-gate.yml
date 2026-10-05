@@ -1,0 +1,30 @@
+name: correction-close-gate
+
+on:
+  issues:
+    types: [closed]
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: "Closed correction issue number to re-check"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+jobs:
+  gate:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.issue.labels.*.name, 'correction')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Reopen unless a merged level 1/2 fix PR is linked
+        run: python3 tools/correction_loop/loop.py close-gate
+        env:
+          GH_TOKEN: ${{ github.token }}
