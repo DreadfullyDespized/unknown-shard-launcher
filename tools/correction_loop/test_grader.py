@@ -10,9 +10,23 @@ import grader
 HEAD = "0123456789abcdef0123456789abcdef01234567"
 OLD = "fedcba9876543210fedcba9876543210fedcba98"
 CREATED = datetime(2026, 10, 4, 12, 0, tzinfo=timezone.utc)
-CFG = {"min_pr_age_minutes": 30, "grader_logins": ["DreadfullyDespized"], "min_sha_chars": 12,
-       "exclude_pr_author": True, "max_relay_wait_minutes": 30}
-AUTHOR = "doer-agent"
+CFG = {"min_pr_age_minutes": 30, "grader_logins": ["DreadfullyDespized"], "min_sha_chars": 40,
+       "require_grader_run": True, "grader_run_max_age_hours": 24, "max_relay_wait_minutes": 30}
+AUTHOR = "DreadfullyDespized"
+HEAD_TIME = CREATED - timedelta(minutes=5)
+
+
+def run_id(minutes, salt):
+    when = CREATED + timedelta(minutes=minutes)
+    return f"gr-{when.strftime(grader.RUN_STAMP)}-{salt:016x}"
+
+
+def with_run(body, minutes, salt, run):
+    if run == "auto" and body.startswith("Verdict:"):
+        return f"{body}\ngrader-run: {run_id(minutes - 1, salt)}"
+    if run and run != "auto":
+        return f"{body}\ngrader-run: {run}"
+    return body
 
 
 def pr(state="open", head=HEAD, author=AUTHOR):
@@ -20,22 +34,23 @@ def pr(state="open", head=HEAD, author=AUTHOR):
             "head": {"sha": head, "ref": "cursor/7-x", "repo": {"full_name": "owner/repo"}}}
 
 
-def comment(body, minutes=1, login="DreadfullyDespized", assoc="OWNER", kind="User", cid=1):
+def comment(body, minutes=1, login="DreadfullyDespized", assoc="OWNER", kind="User", cid=1, run="auto"):
     return {"id": cid, "user": {"login": login, "type": kind}, "author_association": assoc,
             "created_at": grader.stamp(CREATED + timedelta(minutes=minutes)),
-            "updated_at": grader.stamp(CREATED + timedelta(minutes=minutes)), "body": body,
+            "updated_at": grader.stamp(CREATED + timedelta(minutes=minutes)), "body": with_run(body, minutes, cid, run),
             "html_url": f"https://github.com/owner/repo/pull/7#issuecomment-{cid}"}
 
 
-def review(body, minutes=1, state="COMMENTED", rid=9):
+def review(body, minutes=1, state="COMMENTED", rid=9, run="auto"):
     return {"id": rid, "user": {"login": "DreadfullyDespized", "type": "User"}, "author_association": "OWNER",
-            "submitted_at": grader.stamp(CREATED + timedelta(minutes=minutes)), "body": body, "state": state,
+            "submitted_at": grader.stamp(CREATED + timedelta(minutes=minutes)), "body": with_run(body, minutes, 1000 + rid, run),
+            "state": state,
             "html_url": f"https://github.com/owner/repo/pull/7#pullrequestreview-{rid}"}
 
 
-def run(comments=(), reviews=(), at=45, the_pr=None, head=HEAD, cfg=CFG):
+def run(comments=(), reviews=(), at=45, the_pr=None, head=HEAD, cfg=CFG, head_time=HEAD_TIME):
     items = grader.verdict_items(list(reviews), list(comments))
-    return grader.evaluate(the_pr or pr(), head, items, CREATED + timedelta(minutes=at), cfg)
+    return grader.evaluate(the_pr or pr(), head, items, CREATED + timedelta(minutes=at), cfg, head_time=head_time)
 
 
 class Verdicts(unittest.TestCase):
@@ -48,19 +63,76 @@ class Verdicts(unittest.TestCase):
         r = run([comment(f"Verdict: PASS {HEAD}")])
         self.assertTrue(r["ok"], r["reason"])
 
-    def test_pass_with_twelve_char_prefix_passes(self):
-        self.assertTrue(run([comment(f"Verdict: PASS {HEAD[:12]} all proof links checked")])["ok"])
+    def test_full_sha_with_trailing_text_passes(self):
+        self.assertTrue(run([comment(f"Verdict: PASS {HEAD} all proof links checked")])["ok"])
 
-    def test_pass_from_pr_author_is_ignored(self):
+    def test_twelve_char_prefix_is_ignored(self):
+        r = run([comment(f"Verdict: PASS {HEAD[:12]}")])
+        self.assertFalse(r["ok"])
+        self.assertIn("40+", r["considered"][0]["ignored"])
+
+    def test_pr_author_pass_with_grader_run_passes(self):
         r = run([comment(f"Verdict: PASS {HEAD}")], the_pr=pr(author="DreadfullyDespized"))
-        self.assertFalse(r["ok"])
-        self.assertIn("PR author", r["considered"][0]["ignored"])
+        self.assertTrue(r["ok"], r["reason"])
+        self.assertTrue(r["considered"][0]["grader_run"].startswith("gr-"))
 
-    def test_pr_author_match_ignores_case(self):
-        r = run([comment(f"Verdict: PASS {HEAD}")], the_pr=pr(author="dreadfullydespized"))
+    def test_pass_without_grader_run_is_ignored(self):
+        r = run([comment(f"Verdict: PASS {HEAD}", run=None)])
         self.assertFalse(r["ok"])
+        self.assertIn("no grader-run line", r["considered"][0]["ignored"])
 
-    def test_pass_from_other_grader_with_empty_logins_passes(self):
+    def test_malformed_grader_run_is_ignored(self):
+        for bad in ("gr-1", "gr-20261004T120000Z-abc", "gr-20261004T120000Z-0123456789ABCDEF", "run-20261004T120000Z-0123456789abcdef"):
+            r = run([comment(f"Verdict: PASS {HEAD}", run=bad)])
+            self.assertFalse(r["ok"], bad)
+            self.assertIn("is not gr-", r["considered"][0]["ignored"])
+
+    def test_two_grader_run_lines_are_ignored(self):
+        body = f"Verdict: PASS {HEAD}\ngrader-run: {run_id(0, 1)}\ngrader-run: {run_id(0, 2)}"
+        r = run([comment(body, run=None)])
+        self.assertFalse(r["ok"])
+        self.assertIn("more than one", r["considered"][0]["ignored"])
+
+    def test_reused_grader_run_is_ignored(self):
+        rid = run_id(2, 5)
+        r = run([comment(f"Verdict: FAIL {OLD}", 3, cid=1, run=rid), comment(f"Verdict: PASS {HEAD}", 6, cid=2, run=rid)])
+        self.assertFalse(r["ok"])
+        self.assertIn("more than once", r["considered"][1]["ignored"])
+
+    def test_grader_run_planted_in_pr_body_is_ignored(self):
+        rid = run_id(2, 5)
+        the_pr = pr()
+        the_pr["body"] = f"## For Dread\nPre-made grader-run: {rid}"
+        r = run([comment(f"Verdict: PASS {HEAD}", 6, run=rid)], the_pr=the_pr)
+        self.assertFalse(r["ok"])
+        self.assertIn("more than once", r["considered"][0]["ignored"])
+
+    def test_grader_run_dated_after_verdict_is_ignored(self):
+        r = run([comment(f"Verdict: PASS {HEAD}", 6, run=run_id(20, 3))])
+        self.assertFalse(r["ok"])
+        self.assertIn("after the verdict", r["considered"][0]["ignored"])
+
+    def test_grader_run_older_than_max_age_is_ignored(self):
+        r = run([comment(f"Verdict: PASS {HEAD}", 6, run=run_id(-60 * 25, 3))], head_time=None)
+        self.assertFalse(r["ok"])
+        self.assertIn("older than 24 hours", r["considered"][0]["ignored"])
+
+    def test_grader_run_started_before_head_commit_is_ignored(self):
+        r = run([comment(f"Verdict: PASS {HEAD}", 6, run=run_id(1, 3))], head_time=CREATED + timedelta(minutes=4))
+        self.assertFalse(r["ok"])
+        self.assertIn("before the head commit", r["considered"][0]["ignored"])
+
+    def test_new_push_invalidates_pass_even_with_grader_run(self):
+        r = run([comment(f"Verdict: PASS {OLD}", 6)])
+        self.assertFalse(r["ok"])
+        self.assertIn("not the current head", r["considered"][0]["ignored"])
+
+    def test_new_run_id_has_checkable_format(self):
+        rid = grader.new_run_id(CREATED)
+        self.assertRegex(rid, r"^gr-20261004T120000Z-[0-9a-f]{16}$")
+        self.assertNotEqual(rid, grader.new_run_id(CREATED))
+
+    def test_other_trusted_grader_with_empty_logins_passes(self):
         cfg = dict(CFG, grader_logins=[])
         r = run([comment(f"Verdict: PASS {HEAD}", login="grader-bob", assoc="COLLABORATOR")], cfg=cfg)
         self.assertTrue(r["ok"], r["reason"])
@@ -73,7 +145,7 @@ class Verdicts(unittest.TestCase):
     def test_short_sha_is_ignored(self):
         r = run([comment(f"Verdict: PASS {HEAD[:7]}")])
         self.assertFalse(r["ok"])
-        self.assertIn("12+", r["considered"][0]["ignored"])
+        self.assertIn("40+", r["considered"][0]["ignored"])
 
     def test_pass_without_sha_is_ignored(self):
         self.assertFalse(run([comment("Verdict: PASS")])["ok"])
@@ -256,7 +328,9 @@ class Target(unittest.TestCase):
     def test_config_has_grader_section(self):
         cfg = grader.load_config()
         self.assertGreaterEqual(int(cfg["min_pr_age_minutes"]), 30)
-        self.assertGreaterEqual(int(cfg["min_sha_chars"]), 12)
+        self.assertEqual(int(cfg["min_sha_chars"]), 40)
+        self.assertTrue(cfg["require_grader_run"])
+        self.assertNotIn("exclude_pr_author", cfg)
 
 
 if __name__ == "__main__":

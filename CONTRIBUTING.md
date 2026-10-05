@@ -14,7 +14,7 @@
 
 ## Grader check and correction loop
 
-- **`grader` must be green before merge.** The `grader` check fails by default. It passes only when the latest PR comment or review that names the current head starts with `Verdict: PASS <sha>` (12+ hex characters of the head commit), from an owner, member or collaborator who is not the PR author and not a bot (and is in `grader_logins` when that list is set), and the PR is at least 30 minutes old. Any push makes the old PASS stale. Branch protection is not changed; this rule is the gate.
+- **`grader` must be green before merge.** The `grader` check fails by default. It passes only when the latest valid verdict on the PR has the first line `Verdict: PASS <full 40-character head SHA>` and a line `grader-run: gr-YYYYMMDDTHHMMSSZ-<16 hex>` from a fresh `python3 tools/correction_loop/grader.py new-run-id` (one ID per grader session, never reused, dated after the head commit and within 24 hours of the verdict), posted by a non-bot login in `grader_logins` (DreadfullyDespized, the PR author included), and the PR is at least 30 minutes old. Any push makes the old PASS stale. Rules: `docs/correction-loop.md`.
 - **Correction issues:** a failed watched workflow on `main`, a failed deployment, a `Verdict: FAIL` line, the `dread-correction` label, a `/correction` comment or `gh workflow run correction-intake.yml -f kind=correction -f target="<title>"` opens an issue labeled `correction`. It stays closed only when it links a merged PR whose `## For Dread` has its own `**Level:** 1` (codebase) or `**Level:** 2` (lint/CI) line before Proof.
 - **Issues:** open them with the Bug, Improvement or Feature form in `.github/ISSUE_TEMPLATE/`.
 - Details and settings: `docs/correction-loop.md`, `tools/correction_loop/config.json`.

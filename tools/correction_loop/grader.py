@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 import re
+import secrets
 import sys
 import time
 from datetime import datetime, timedelta, timezone
@@ -16,6 +17,10 @@ from gh import Api, ApiError
 TRUSTED = {"OWNER", "MEMBER", "COLLABORATOR"}
 VERDICT_RX = re.compile(r"^Verdict: (PASS|FAIL)\b(.*)$")
 SHA_RX = re.compile(r"(?<![0-9A-Za-z])[0-9a-f]{7,40}(?![0-9A-Za-z])")
+RUN_LINE_RX = re.compile(r"^grader-run: (\S+)\s*$", re.M)
+RUN_ID_RX = re.compile(r"^gr-(\d{8}T\d{6}Z)-([0-9a-f]{16})$")
+RUN_STAMP = "%Y%m%dT%H%M%SZ"
+CLOCK_SKEW = timedelta(minutes=2)
 WORKFLOW_FILE = "grader.yml"
 
 
@@ -44,6 +49,32 @@ def parse_verdict(text):
     return m.group(1), SHA_RX.findall(m.group(2))
 
 
+def new_run_id(now=None):
+    when = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    return f"gr-{when.strftime(RUN_STAMP)}-{secrets.token_hex(8)}"
+
+
+def parse_run_id(text):
+    lines = RUN_LINE_RX.findall((text or "").replace("\r\n", "\n"))
+    if len(lines) != 1:
+        return None, ("has no grader-run line" if not lines else "has more than one grader-run line")
+    m = RUN_ID_RX.match(lines[0])
+    if not m:
+        return None, f"grader-run {lines[0][:40]} is not gr-YYYYMMDDTHHMMSSZ-<16 hex>"
+    when = datetime.strptime(m.group(1), RUN_STAMP).replace(tzinfo=timezone.utc)
+    return {"id": lines[0], "at": when}, None
+
+
+def run_id_counts(items, pr_text):
+    counts = {}
+    for item in items:
+        for rid in set(RUN_LINE_RX.findall((item.get("body") or "").replace("\r\n", "\n"))):
+            counts[rid] = counts.get(rid, 0) + 1
+    for rid in set(re.findall(r"gr-\d{8}T\d{6}Z-[0-9a-f]{16}", pr_text or "")):
+        counts[rid] = counts.get(rid, 0) + 1
+    return counts
+
+
 def verdict_items(reviews, comments):
     items = []
     for r in reviews:
@@ -57,13 +88,28 @@ def verdict_items(reviews, comments):
     return [i for i in items if i["at"] and i.get("state") != "DISMISSED"]
 
 
-def ignore_reason(item, cfg, head_sha, pr_author=""):
+def run_reason(item, cfg, head_time, counts):
+    run, why = parse_run_id(item["body"])
+    if why:
+        return why
+    if counts.get(run["id"], 0) > 1:
+        return f"grader-run {run['id']} appears more than once on this PR; each verdict needs a fresh grader session"
+    said = parse_time(item["at"])
+    if run["at"] > said + CLOCK_SKEW:
+        return f"grader-run {run['id']} is dated after the verdict was posted"
+    max_age = timedelta(hours=int(cfg.get("grader_run_max_age_hours", 24)))
+    if said - run["at"] > max_age:
+        return f"grader-run {run['id']} is older than {max_age.total_seconds() / 3600:g} hours at verdict time"
+    if head_time and run["at"] + CLOCK_SKEW < head_time:
+        return f"grader-run {run['id']} started before the head commit was made at {stamp(head_time)}"
+    return None
+
+
+def ignore_reason(item, cfg, head_sha, head_time=None, counts=None):
     user = item["user"]
     login = user.get("login") or ""
     if user.get("type") == "Bot" or login.endswith("[bot]"):
         return "posted by a bot"
-    if cfg.get("exclude_pr_author", True) and pr_author and login.lower() == pr_author.lower():
-        return f"{login} is the PR author; a grader must be someone else"
     if item["association"] not in TRUSTED:
         return f"author association {item['association']} is not owner, member or collaborator"
     logins = cfg.get("grader_logins") or []
@@ -76,20 +122,24 @@ def ignore_reason(item, cfg, head_sha, pr_author=""):
         return f"names no commit SHA of {min_chars}+ hex characters on the Verdict line"
     if not any(head_sha.startswith(s) for s in named):
         return f"names {', '.join(s[:12] for s in named)}, not the current head {head_sha[:12]}"
+    if cfg.get("require_grader_run", True):
+        return run_reason(item, cfg, head_time, counts or {})
     return None
 
 
-def evaluate(pr, head_sha, items, now, cfg, tz="America/Chicago"):
+def evaluate(pr, head_sha, items, now, cfg, tz="America/Chicago", head_time=None):
     considered = []
     applicable = []
     pr_author = (pr.get("user") or {}).get("login") or ""
+    counts = run_id_counts(items, f"{pr.get('title') or ''}\n{pr.get('body') or ''}")
     for item in sorted(items, key=lambda i: (i["at"], str(i["id"]))):
         parsed = parse_verdict(item["body"])
         if not parsed:
             continue
-        why = ignore_reason(item, cfg, head_sha, pr_author)
+        why = ignore_reason(item, cfg, head_sha, head_time, counts)
         considered.append({"verdict": parsed[0], "kind": item["kind"], "url": item["url"], "at": item["at"],
-                           "login": item["user"].get("login"), "ignored": why})
+                           "login": item["user"].get("login"), "grader_run": (parse_run_id(item["body"])[0] or {}).get("id"),
+                           "ignored": why})
         if not why:
             applicable.append((parsed[0], item))
     min_age = int(cfg.get("min_pr_age_minutes", 30))
@@ -126,6 +176,17 @@ def fetch(api, number):
     return pr, verdict_items(reviews, comments)
 
 
+def head_time_of(api, sha):
+    if not sha:
+        return None
+    try:
+        data = api.get(f"/repos/{api.repo}/commits/{sha}") or {}
+    except ApiError:
+        return None
+    date = ((data.get("commit") or {}).get("committer") or {}).get("date")
+    return datetime.fromisoformat(date.replace("Z", "+00:00")).astimezone(timezone.utc) if date else None
+
+
 def target(event_name, payload):
     if event_name in ("pull_request", "pull_request_target", "pull_request_review"):
         pr = payload.get("pull_request") or {}
@@ -153,7 +214,7 @@ def report(result):
 def check(api, cfg, event_name, payload, now=None):
     number, head = target(event_name, payload)
     pr, items = fetch(api, number)
-    return evaluate(pr, head, items, now or datetime.now(timezone.utc), cfg)
+    return evaluate(pr, head, items, now or datetime.now(timezone.utc), cfg, head_time=head_time_of(api, head))
 
 
 def relay_target(event_name, payload):
@@ -200,7 +261,7 @@ def relay(api, cfg, event_name, payload, sleep=time.sleep, now=datetime.now):
     number = found
     pr, items = fetch(api, number)
     head = (pr.get("head") or {}).get("sha") or ""
-    result = evaluate(pr, head, items, now(timezone.utc), cfg)
+    result = evaluate(pr, head, items, now(timezone.utc), cfg, head_time=head_time_of(api, head))
     waited = 0
     if result.get("waiting"):
         cap = int(cfg.get("max_relay_wait_minutes", 30)) * 60
@@ -219,11 +280,14 @@ def relay(api, cfg, event_name, payload, sleep=time.sleep, now=datetime.now):
 
 def main(argv=None):
     ap = argparse.ArgumentParser()
-    ap.add_argument("mode", choices=["check", "relay"])
+    ap.add_argument("mode", choices=["check", "relay", "new-run-id"])
     ap.add_argument("--event", default=os.environ.get("GITHUB_EVENT_PATH"))
     ap.add_argument("--event-name", default=os.environ.get("GITHUB_EVENT_NAME"))
     ap.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY"))
     args = ap.parse_args(argv)
+    if args.mode == "new-run-id":
+        print(new_run_id())
+        return 0
     with open(args.event, encoding="utf-8") as fh:
         payload = json.load(fh)
     api = Api(args.repo)
