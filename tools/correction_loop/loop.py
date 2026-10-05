@@ -90,7 +90,7 @@ def extract_root(log):
     failed = []
     for l in lines:
         s = l.strip()
-        if s.startswith("FAILED "):
+        if s.startswith("FAILED ") and not s.startswith("FAILED ("):
             failed.append(s[7:].split(" - ", 1)[0].strip())
         elif re.match(r"^(FAIL|ERROR): \S", s):
             failed.append(s.split(": ", 1)[1].strip())
