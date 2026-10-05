@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\ShardLauncher.Patching\ShardLauncher.Patching.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\notices\ClassicUO-THIRD-PARTY-NOTICES.txt" LogicalName="notices.cuo.txt" />
+  </ItemGroup>
+
+  <Target Name="LauncherBuildConfig" BeforeTargets="BeforeBuild">
+    <PropertyGroup>
+      <_LauncherSettingsFile>$(IntermediateOutputPath)BuildSettings.g.cs</_LauncherSettingsFile>
+    </PropertyGroup>
+    <Error Condition="'$(_LauncherBuildConfigExplicit)' == 'true' And !Exists('$(LauncherBuildConfig)')"
+           Text="LauncherBuildConfig '$(LauncherBuildConfig)' does not exist." />
+    <Error Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('$(LauncherDisplayName)$(LauncherDataDirName)$(LauncherServerHost)$(LauncherServerPort)$(LauncherPatchBaseUrl)', '[&quot;\\\r\n]'))"
+           Text="Launcher build config values must not contain quotes, backslashes or newlines." />
+    <Error Condition="'$(RequireLauncherConfig)' == 'true' And ('$(LauncherServerHost)' == '' Or '$(LauncherServerPort)' == '' Or '$(LauncherPatchBaseUrl)' == '' Or '@(LauncherTrustedKey)' == '')"
+           Text="RequireLauncherConfig=true but LauncherServerHost, LauncherServerPort, LauncherPatchBaseUrl or LauncherTrustedKey is missing (see launcher.build.example.props)." />
+    <Error Condition="'@(LauncherTrustedKey)' != '' And '%(LauncherTrustedKey.KeyId)' == ''" Text="LauncherTrustedKey '%(LauncherTrustedKey.Identity)' has no KeyId metadata." />
+    <Error Condition="'@(LauncherTrustedKey)' != '' And !$([System.Text.RegularExpressions.Regex]::IsMatch('%(LauncherTrustedKey.KeyId)', '^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$'))" Text="LauncherTrustedKey KeyId '%(LauncherTrustedKey.KeyId)' must match ^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$." />
+    <Error Condition="'@(LauncherTrustedKey)' != '' And !Exists('%(LauncherTrustedKey.FullPath)')" Text="LauncherTrustedKey file '%(LauncherTrustedKey.FullPath)' not found." />
+    <Error Condition="'@(LauncherTrustedKey)' != '' And Exists('%(LauncherTrustedKey.FullPath)') And $([System.IO.File]::ReadAllText('%(LauncherTrustedKey.FullPath)').Contains('PRIVATE'))" Text="LauncherTrustedKey '%(LauncherTrustedKey.FullPath)' looks like a PRIVATE key. Embed only the public key." />
+    <ItemGroup>
+      <_LauncherSettingsLine Include="// &lt;auto-generated&gt; from the launcher build config. Do not edit or commit. &lt;/auto-generated&gt;" />
+      <_LauncherSettingsLine Include="namespace ShardLauncher.Core%3B" />
+      <_LauncherSettingsLine Include="internal static class BuildSettings" />
+      <_LauncherSettingsLine Include="{" />
+      <_LauncherSettingsLine Include="    public const string DisplayName = &quot;$(LauncherDisplayName)&quot;%3B" />
+      <_LauncherSettingsLine Include="    public const string DataDirName = &quot;$(LauncherDataDirName)&quot;%3B" />
+      <_LauncherSettingsLine Include="    public const string ServerHost = &quot;$(LauncherServerHost)&quot;%3B" />
+      <_LauncherSettingsLine Include="    public const string ServerPort = &quot;$(LauncherServerPort)&quot;%3B" />
+      <_LauncherSettingsLine Include="    public const string PatchBaseUrl = &quot;$(LauncherPatchBaseUrl)&quot;%3B" />
+      <_LauncherSettingsLine Include="}" />
+    </ItemGroup>
+    <WriteLinesToFile File="$(_LauncherSettingsFile)" Lines="@(_LauncherSettingsLine)" Overwrite="true" WriteOnlyWhenDifferent="true" />
+    <ItemGroup>
+      <Compile Include="$(_LauncherSettingsFile)" />
+      <FileWrites Include="$(_LauncherSettingsFile)" />
+      <EmbeddedResource Include="@(LauncherTrustedKey->'%(FullPath)')" LogicalName="launcher.keys.%(LauncherTrustedKey.KeyId).pem" />
+    </ItemGroup>
+  </Target>
+</Project>

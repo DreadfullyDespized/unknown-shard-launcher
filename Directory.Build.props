@@ -1,0 +1,7 @@
+<Project>
+  <PropertyGroup>
+    <_LauncherBuildConfigExplicit Condition="'$(LauncherBuildConfig)' != ''">true</_LauncherBuildConfigExplicit>
+    <LauncherBuildConfig Condition="'$(LauncherBuildConfig)' == ''">$(MSBuildThisFileDirectory)launcher.build.props</LauncherBuildConfig>
+  </PropertyGroup>
+  <Import Project="$(LauncherBuildConfig)" Condition="Exists('$(LauncherBuildConfig)')" />
+</Project>
