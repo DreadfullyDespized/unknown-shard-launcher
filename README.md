@@ -1,3 +1,5 @@
+**Repo label: TEST** — see [CONTRIBUTING.md](CONTRIBUTING.md#repo-label-test) for the required process.
+
 # Shard Launcher
 
 This is an open-source (MIT) auto-updater and launcher for an Ultima Online free shard. It is generic: it holds **no server-specific values**. The server address, the patch URL and the trusted signing key are supplied at build time (see [Configuring a build](#configuring-a-build)).
