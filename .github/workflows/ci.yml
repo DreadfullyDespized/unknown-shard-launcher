@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: dotnet build + test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: Build
+        run: dotnet build ShardLauncher.sln -c Release
+      - name: Test
+        run: dotnet test ShardLauncher.sln -c Release --no-build --logger "console;verbosity=normal"
+      - name: No server details in the tree
+        run: |
+          if git grep -n -i -E 'ddns\.net|unknownshard|13\.66\.161\.135|\b2593\b' -- . ':!tools/check_no_comments.py'; then
+            echo "Server-specific values found in the tree" >&2
+            exit 1
+          fi
+          echo "0 server hostnames, IPs or ports"
